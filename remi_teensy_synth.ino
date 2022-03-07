@@ -414,7 +414,6 @@ void  RemiSynthNoteChange(uint8 noteNum)
 */
 void   RemiSynthExpression(unsigned data14)
 {
-    level;
 /*
   // Apply square law transfer function (legacy)
   uint32  ulval = ((uint32) data14 * data14) / 16384;  
@@ -1294,7 +1293,7 @@ int  GetPatchTableIndex(unsigned patchNumber)
 	
   for (i = 0;  i < patchCount;  i++) 
   {
-    if (g_PatchProgram[i].PatchNumber == patchID)  { patchIndex = i;  break; }
+    if (g_PatchProgram[i].PatchNumber == patchNumber)  { patchIndex = i;  break; }
   }
   
   return  patchIndex;

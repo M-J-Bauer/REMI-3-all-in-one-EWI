@@ -62,9 +62,9 @@ typedef void (* pfnvoid)(void);     // pointer to void function
 
 #define until(exp)  while(!(exp))   // Usage:  do { ... } until (exp);
 
-#define TEST_BIT(u, bm)   ((u) & (bm))
-#define SET_BIT(u, bm)    ((u) |= (bm))
-#define CLEAR_BIT(u, bm)  ((u) &= ~(bm))
+#define TEST_BIT(u, nb)   ((u) & (1<<nb))  // nb is bit number (0, 1, 2, ...)
+#define SET_BIT(u, nb)    ((u) |= (1<<nb))
+#define CLEAR_BIT(u, nb)  ((u) &= ~(1<<nb))
 
 #define SWAP(w)     ((((w) & 0xFF) << 8) | (((w) >> 8) & 0xFF))
 
