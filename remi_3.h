@@ -14,7 +14,7 @@
 //                       FIRMWARE VERSION NUMBER AND BUILD OPTIONS
 //
 #define BUILD_VER_MAJOR   1
-#define BUILD_VER_MINOR   0
+#define BUILD_VER_MINOR   1
 #define BUILD_VER_DEBUG   0
 //
 // =======================================================================================
@@ -33,7 +33,6 @@
 #define NOTE_ON_VELOCITY_DELAY     10      // Delay (ms) from note trigger to get velocity
 #define MIDI_EXPRN_CC               2      // 2:Breath-pressure, 7:Channel-volume, 11:Expression
 #define MIDI_MODN_MSG_INTERVAL     30      // unit = ms
-#define MAXIMUM_DIAG_STEPS          6      // Diagnostic mode usage
 
 #define ERROR_EEPROM_DATA_CHECK    (1<<0)    // bit0 of error code
 #define ERROR_CALIBRATING_SENSOR   (1<<1)    // bit1 of error code
@@ -43,7 +42,7 @@
 #define VBATT_PIN                  A0
 #define BREATH_SENSOR_PIN          A6
 #define MODN_PAD_PIN               A7
-#define BATT_LED_PIN               3   // active High
+#define BATT_LED_PIN               3   // PWM (variable intensity)
 #define VBUS_DET_PIN               4   // active High
 #define SET_BUTTON_PIN             5   // active LOW (when pressed)
 #define SPKR_EN_PIN                6   // active High
@@ -53,10 +52,10 @@
 #define TEENSY_LED_PIN             13  
  
 // Macros to perform low-level I/O operations
-#define BATT_LED_CONFIG()          pinMode(BATT_LED_PIN, OUTPUT)
-#define BATT_LED_ON()              digitalWrite(BATT_LED_PIN, 1)
-#define BATT_LED_OFF()             digitalWrite(BATT_LED_PIN, 0)
-#define BATT_LED_SET_DUTY(d)       // TODO (PWM) ???  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+#define BATT_LED_CONFIG()          analogWriteFrequency(BATT_LED_PIN, 2197.265)  // PWM freq. Hz
+#define BATT_LED_ON()              analogWrite(BATT_LED_PIN, 4096)  // PWM max. duty (12 bits)
+#define BATT_LED_OFF()             analogWrite(BATT_LED_PIN, 0)
+#define BATT_LED_SET_DUTY(d)       analogWrite(BATT_LED_PIN, (4096*d)/100)  // 0 < d < 100 %
 #define USB_VBUS_DET_CONFIG()      pinMode(VBUS_DET_PIN, INPUT)
 #define USB_VBUS_DETECTED          (digitalRead(VBUS_DET_PIN) != 0)
 #define SET_BUTTON_CONFIG()        pinMode(SET_BUTTON_PIN, INPUT)
@@ -95,7 +94,8 @@ extern bitmap_t  remi_logo_85x30[];  // bitmap image data
 
 enum  Values_for_Display_Menu_Item
 {
-  DISPLAY_OFF = 0,
+  DISPLAY_IDLE = 0,
+  DISPLAY_PROMPT,
   DISPLAY_OCTAVE,
   DISPLAY_TRANSPOSE,
   DISPLAY_PRESET,
@@ -109,8 +109,6 @@ enum  Values_for_Display_Menu_Item
   DISPLAY_SYSINFO,
   DISPLAY_PRESSURE,
   DISPLAY_CHANNEL,    // todo
-  DISPLAY_VELOCITY,   // todo
-  DISPLAY_PATCHES,    // todo
   DISPLAY_UNDEF
 };
 
@@ -161,6 +159,7 @@ void   Player_UI_Service();
 void   DisplayUpdate();
 void   DisplayStartupError();
 void   DisplayStartupScreen();
+void   DisplayPrompt(bool prep);
 void   DisplayOctaveShift(bool prep);
 void   DisplayTranspose(bool prep);
 void   DisplayPreset(bool prep);
@@ -172,16 +171,14 @@ void   DisplaySpeaker(bool prep);
 void   DisplayBattery(bool prep);
 void   DisplayShutdown(bool prep);
 void   DisplaySystemInfo(bool prep);
+void   DisplayPressure(bool prep);
 void   DisplayMidiChannel(bool prep);  // todo
-void   DisplayVelocity(bool prep);  // todo
-void   DisplayPatchList(bool prep);  // todo
 void   ButtonScan();
 void   DiagnosticService();
 
 // Sensor reading functions
 // ````````````````````````
 uint16  GetNoteOnOffState();
-uint16 *GetTouchPadReadings();
 uint16  GetTouchPadStates();
 uint16  GetBreathPressureLevel();
 uint16  GetModulationPadForce();

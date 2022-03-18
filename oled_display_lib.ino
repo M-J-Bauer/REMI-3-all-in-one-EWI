@@ -918,6 +918,7 @@ void  DisplayTextCentered12p(short ypos, const char *str)
 }
 
 // Function supports PROP_12_NORM font only.
+// Arg. ypos is the top line of the box.
 //
 void  DisplayTextCenteredInBox(short ypos, const char *str)
 {
@@ -925,9 +926,9 @@ void  DisplayTextCenteredInBox(short ypos, const char *str)
   short xpos = (128 - strWidth) / 2;
 
   Disp_SetFont(PROP_12_NORM);
-  Disp_PosXY(xpos, ypos);
+  Disp_PosXY(xpos, ypos+3);
   Disp_PutText(str);
-  Disp_PosXY(xpos-4, ypos-3);
+  Disp_PosXY(xpos-4, ypos);
   DrawBox(strWidth+6, 16);
 }
 
@@ -938,13 +939,13 @@ void  DrawBox(short w, short h)
   short  yorg = Disp_GetY();
 
   Disp_PosXY(xorg+1, yorg);
-  Disp_DrawLineHoriz(w-1);
+  Disp_DrawLineHoriz(w-2);
   Disp_PosXY(xorg, yorg+1);
-  Disp_DrawLineVert(h-1);
-  Disp_PosXY(xorg+1, yorg+h);
-  Disp_DrawLineHoriz(w-1);
-  Disp_PosXY(xorg+w, yorg+1);
-  Disp_DrawLineVert(h-1);
+  Disp_DrawLineVert(h-2);
+  Disp_PosXY(xorg+1, yorg+h-1);
+  Disp_DrawLineHoriz(w-2);
+  Disp_PosXY(xorg+w-1, yorg+1);
+  Disp_DrawLineVert(h-2);
 }
 
 

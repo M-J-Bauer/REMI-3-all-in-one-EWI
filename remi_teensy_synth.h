@@ -18,11 +18,10 @@
 #define FILTER_OUTPUT_GAIN       4.0f    // Set to avoid overloading output mixer
 #define NOISE_FILTER_GAIN        1.0f    // Noise generator post-filter gain (x8)
 
-#define USER_WAVE_TABLE_ID          0
 #define WAVE_TABLE_MAXIMUM_SIZE  2600    // samples
-#define REVERB_DELAY_MAX_SIZE    2000    // samples (max. 0.05 sec.)
-#define REVERB_LOOP_TIME_SEC    0.04f    // seconds
-#define REVERB_DECAY_TIME_SEC    0.5f    // seconds
+#define REVERB_DELAY_MAX_SIZE    2000    // samples 
+#define REVERB_LOOP_TIME_SEC     0.04    // seconds (max. 0.05 sec.)
+#define REVERB_DECAY_TIME_SEC     0.5    // seconds
 #define SINE_WAVE_TABLE_SIZE     1260    // samples (for g_sinewave[] LUT)
 
 #define FIXED_MIN_LEVEL  (1)                     // Minimum normalized signal level (0.000001)
@@ -57,7 +56,7 @@
 #define NOISE_PITCHED               4    // Pitched noise
 
 // Possible values for patch parameter: m_Patch.NoiseLevelCtrl
-#define NOISE_LVL_ZERO              0    // Noise level is muted (noise off)
+#define NOISE_LVL_ZERO              0    // Noise generator off
 #define NOISE_LVL_FIXED             1    // Noise level is fixed (settable)
 #define NOISE_LVL_AMPLD_ENV         2    // Noise level control by Ampld Envelope
 #define NOISE_LVL_EXPRESS           3    // Noise level control by Expression (CC2)
@@ -69,7 +68,7 @@
 #define FILTER_CTRL_ENV_POS         2    // Filter Fc control by Ampld Envelope
 #define FILTER_CTRL_ENV_NEG         3    // Filter Fc control by Ampld Env. Inverted
 #define FILTER_CTRL_LFO             4    // Filter Fc control by LFO (vibrato)
-#define FILTER_CTRL_MODULN          5    // Filter Fc control by Modulation Lvr (CC1)
+#define FILTER_CTRL_MODULN          5    // Filter Fc control by Modulation Pad (CC1)
 
 // Possible values for patch parameter: m_Patch.OutputAmpldCtrl
 #define AMPLD_CTRL_FIXED_L1         0    // Output ampld is fixed, Level 1 (default)
@@ -77,10 +76,6 @@
 #define AMPLD_CTRL_EXPRESS          2    // Output ampld control by Expression (CC2/CC11)
 #define AMPLD_CTRL_AMPLD_ENV        3    // Output ampld control by Amplitude Envelope
 #define AMPLD_CTRL_ENV_VELO         4    // Output ampld control by Env * Velocity
-
-#define PARAM_HASH_VALUE(a, b)   ((a) * 100 + b)   // Hash code for 2-char abbreviation
-#define IS_FLASH_WAVETABLE(id)   (id != 0 && id <= GetHighestWaveTableID())
-
 
 enum  Amplitude_Envelope_Phases
 {
@@ -196,8 +191,6 @@ void   VibratoRampGenerator();
 PatchParamTable_t  *GetActivePatchTable();
 int      GetActivePatchID();
 int      GetPatchTableIndex(unsigned patchNumber);
-BOOL     isNoteOn();
-BOOL     isSynthActive();
 fixed_t  GetExpressionLevel(void);
 fixed_t  GetModulationLevel(void);
 fixed_t  Base2Exp(fixed_t xval);

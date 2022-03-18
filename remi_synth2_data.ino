@@ -10,15 +10,12 @@
 
 // Pre-defined Patch "Programs" -- Array of patch parameter tables in flash memory
 // ```````````````````````````````````````````````````````````````````````````````
-// Once copied into the active patch table in data memory (m_Patch), parameters may be
-// modified by the CLI command "patch" to create a "User Patch".
-//
 const  PatchParamTable_t  g_PatchProgram[] =
 {
     //--------  R E C O R D E R S,  F L U T E S   &   P I P E S  ---------
     {
         10,     // Patch ID Number
-        "Recorder, treble",
+        "Recorder",
         13,     // W1: OSC1 Wave-table ID (0..250) = alto/treble recorder
         13,     // W2: OSC2 Wave-table ID (0..250)
         0,      // OD: OSC2 Detune, cents (+/-1200)
@@ -150,7 +147,7 @@ const  PatchParamTable_t  g_PatchProgram[] =
 
     {
         14,     // Patch ID Number
-        "Analogue Flute",
+        "Wannabe Flute",
         7,      // W1: OSC1 Wave-table ID (0..250)
         3,      // W2: OSC2 Wave-table ID (0..250)
         0,      // OD: OSC2 Detune, cents (+/-1200)
@@ -250,7 +247,7 @@ const  PatchParamTable_t  g_PatchProgram[] =
     
     {
         23,     // Patch ID Number
-        "Alto Saxophone",
+        "Unreal Saxophone",
         9,      // W1: OSC1 Wave-table ID (0..250)
         9,      // W2: OSC2 Wave-table ID (0..250)
         0,      // OD: OSC2 Detune, cents (+/-1200)
@@ -714,7 +711,7 @@ const  PatchParamTable_t  g_PatchProgram[] =
     //----------------  S T R I N G   I N S T R U M E N T S  ----------------
     {
         60,     // Patch ID Number
-        "Violin #1",
+        "Violin (needs work)",
         3,      // W1: OSC1 Wave-table ID (0..250) 
         3,      // W2: OSC2 Wave-table ID (0..250)   
         0,      // OD: OSC2 Detune, cents (+/-1200)
@@ -744,10 +741,10 @@ const  PatchParamTable_t  g_PatchProgram[] =
         100,    // AS: Ampld Env Sustain level (0..100 %)
         2,      // AC: Ampld Control (0:Max, 1:Fixed.5, 2:Expr, 3:Amp.Env, 4:Env*Vel)
     },
-
-    //---------------  T E S T   &   D E M O   P A T C H E S  --------------
+	
+	    //---------------  T E S T   &   D E M O   P A T C H E S  --------------
     {
-        90,     // Patch ID Number :: Tests ampld envelope shaper and attenuator
+        90,     // Patch ID Number
         "Test Patch", 
         1,      // W1: OSC1 Wave-table ID (0..250)  <------ sinewave
         3,      // W2: OSC2 Wave-table ID (0..250)  <------ sawtooth
@@ -772,48 +769,13 @@ const  PatchParamTable_t  g_PatchProgram[] =
         0,      // FT: Filter Note Tracking offset (0..60 semitones)
                 
         50,     // AA: Ampld Env Attack time (10..5000+ ms)
-        0,      // AP: Ampld Env Peak time (0..5000+ ms)
-        10,     // AD: Ampld Env Decay time (10..5000+ ms)
-        500,    // AR: Ampld Env Release time (10..5000+ ms)
-        95,     // AS: Ampld Env Sustain level (0..100 %)
+        200,    // AP: Ampld Env Peak time (0..5000+ ms)
+        500,    // AD: Ampld Env Decay time (10..5000+ ms)
+        10,     // AR: Ampld Env Release time (10..5000+ ms)
+        50,     // AS: Ampld Env Sustain level (0..100 %)
         3,      // AC: Ampld Control (0:Max, 1:Fixed.5, 2:Expr, 3:Amp.Env, 4:Env*Vel)
-    },
-    
-    {
-        91,     // Patch ID Number
-        "Wave Morph Demo #1",
-        4,      // W1: OSC1 Wave-table ID (0..250)
-        3,      // W2: OSC2 Wave-table ID (0..250)
-        0,      // OD: OSC2 Detune, cents (+/-1200)
-        100,    // PB: Pitch Bend range, cents (0..1200)
-        70,     // LF: LFO Freq x10 Hz (1..250)
-        50,     // VD: Vibrato Depth, cents (0..200)
-        300,    // VR: Vibrato Ramp time, (10..5000+ ms)
-
-        1,      // MC: Mixer Control (0:Fixed, 1:Contour, 2:LFO, 3:Exprn, 4:Modn)
-        0,      // ML: Mixer OSC2 Level in Fixed mode (0..100 %)
-        0,      // CS: Contour Env Start level (0..100 %)
-        50,     // CD: Contour Env Delay time (5..5000+ ms)
-        2000,   // CR: Contour Env Ramp time (5..5000+ ms)
-        100,    // CH: Contour Env Hold level (0..100 %)
-        
-        0,      // NM: Noise Mode (0:Off, 1:Noise, 2:Add wave, 3:Mix wave; +4:Pitch)
-        0,      // NC: Noise Level Ctrl (0:Off, 1:Fixed, 2:Amp.Env, 3:Expr, 4:Modn)
-        0,      // FC: Filter Control (0:Fixed, 1:Cont, 2:Env+, 3:Env-, 4:LFO, 5:Modn)
-        0,      // FR: Filter Resonance x10000 (0..9999, 0:Bypass)
-        0,      // FF: Filter Freq. in Fixed mode (40..10000 Hz, 0:NoteTracking)
-        0,      // FT: Filter Note Tracking offset (0..60 semitones)
-                
-        50,     // AA: Ampld Env Attack time (10..5000+ ms)
-        0,      // AP: Ampld Env Peak time (0..5000+ ms)
-        10,     // AD: Ampld Env Decay time (10..5000+ ms)
-        500,    // AR: Ampld Env Release time (10..5000+ ms)
-        95,     // AS: Ampld Env Sustain level (0..100 %)
-        3,      // AC: Ampld Control (0:Max, 1:Fixed.5, 2:Expr, 3:Amp.Env, 4:Env*Vel)
-    },
-
-    // Add more patch definitions here ...
-};
+    }
+};  // end patch definitions table
 
 
 // Function returns the number of Predefined Patch definitions in flash PM

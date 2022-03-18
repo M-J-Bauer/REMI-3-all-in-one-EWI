@@ -12,7 +12,6 @@
    ================================================================================================
 */
 #include "remi_teensy_synth.h"
-#include "Wire.h"  // IIC (I2C, TWI) library
 
 fixed_t  ReverbDelayLine[REVERB_DELAY_MAX_SIZE];  // fixed-point samples
 
@@ -66,6 +65,8 @@ static fixed_t  m_RvbDecay;               // Reverb. decay factor
 static fixed_t  m_RvbAtten;               // Reverb. attenuation factor
 static fixed_t  m_RvbMix;                 // Reverb. wet/dry mix ratio
 
+// Audio Sampling Routine variables
+//
 volatile uint8    v_SynthEnable;      // Signal to enable synth sampling routine
 volatile int32    v_Osc1Angle;        // sample pos'n in wave-table, OSC1 [16:16]
 volatile int32    v_Osc2Angle;        // sample pos'n in wave-table, OSC2 [16:16]
@@ -132,12 +133,12 @@ void  RemiSynthAudioInit(void)
   sampleTimer.priority(1);
 
   // Calculate reverb parameters
-  m_RvbDelayLen = (int) (REVERB_LOOP_TIME_SEC * SAMPLE_RATE_HZ);
+  m_RvbDelayLen = (int) REVERB_LOOP_TIME_SEC * SAMPLE_RATE_HZ;
   if (m_RvbDelayLen > REVERB_DELAY_MAX_SIZE) m_RvbDelayLen = REVERB_DELAY_MAX_SIZE;
-  float rvbDecayFactor = REVERB_LOOP_TIME_SEC / REVERB_DECAY_TIME_SEC;
+  float rvbDecayFactor = (float) REVERB_LOOP_TIME_SEC / REVERB_DECAY_TIME_SEC;
   m_RvbDecay = FloatToFixed( powf(0.001f, rvbDecayFactor) );
   
-  // Reverb variables -- Start-up defaults (may be adjusted by player)
+  // Reverb variables -- Start-up defaults (may be altered subsequently)
   m_RvbAtten = IntToFixedPt(80) / 100;
   m_RvbMix = IntToFixedPt(10) / 100;
 
@@ -238,8 +239,7 @@ void  WaveTableSelect(uint8 osc_num, uint8 wave_id)
 
 /*`````````````````````````````````````````````````````````````````````````````````````````````````
    Function:     Copies patch parameters from a given pre-defined patch table in flash
-                 program memory to the "active" patch parameter table in data memory, except
-                 if patchNum is 0, load last saved 'User Patch' from EEPROM image.
+                 program memory to the "active" patch parameter table in data memory.
                  If the given patch ID number cannot be found, the function will copy
                  parameters from a "default" patch (idx == 0) and return ERROR (-1).
 
@@ -321,6 +321,7 @@ void  RemiSynthNoteOn(uint8 noteNum, uint8 velocity)
     m_LegatoNoteChange = 0;    // Not a Legato event
     m_TriggerAttack = 1;       // Let 'er rip, Boris
     m_ContourEnvTrigger = 1;
+    m_Note_ON = TRUE;
   }
   else  // Note already playing -- Legato note change
   {
@@ -414,13 +415,14 @@ void  RemiSynthNoteChange(uint8 noteNum)
 */
 void   RemiSynthExpression(unsigned data14)
 {
-/*
-  // Apply square law transfer function (legacy)
+
+  // Option 1: Apply square law transfer function
   uint32  ulval = ((uint32) data14 * data14) / 16384;  
   fixed_t level = ulval << 6;  // convert to fixed-point fraction (20 bits)
   if (level > FIXED_MAX_LEVEL) level = FIXED_MAX_LEVEL;  // clip at 0.99999
-*/
-  fixed_t level = ScurveTransform(data14);  // Apply "S-curve" transfer function
+
+  // Option 2: Apply "S-curve" transfer function
+  //  fixed_t level = ScurveTransform(data14);  
 
   m_PressureLevel = level;  // process variable
 }
@@ -524,7 +526,7 @@ void  RemiSynthPitchBendModeSet(unsigned mode)
 */
 void  RemiSynthReverbLevelSet(unsigned level_pc)
 {
-  if (level_pc <= 100)  m_RvbMix = (IntToFixedPt(1) * level_pc) / 100;
+  if (level_pc <= 100)  m_RvbMix = IntToFixedPt(level_pc) / 100;
 }
 
 /*
@@ -534,7 +536,7 @@ void  RemiSynthReverbLevelSet(unsigned level_pc)
 */
 void  RemiSynthReverbAttenSet(unsigned atten_pc)
 {
-  if (atten_pc <= 100)  m_RvbAtten = (IntToFixedPt(1) * atten_pc) / 100;
+  if (atten_pc <= 100)  m_RvbAtten = IntToFixedPt(atten_pc) / 100;
 }
 
 
@@ -1053,12 +1055,11 @@ void   NoiseLevelControl()
   else if (m_Patch.NoiseLevelCtrl == NOISE_LVL_MODULN)     // mode 4
     v_NoiseLevel = (m_ModulationLevel * 75) / 100;
   else  v_NoiseLevel = 0;  // ...........................  // mode 0 (Noise OFF)
-
 }
 
 
 /*
-   Bi-quad resonant filter centre frequency control (modulation)
+   Bi-quad resonant filter -- Centre frequency control (modulation)
 
    Called by the RemiSynthProcess() routine at 5ms intervals, this function updates the
    bi-quad IIR filter coefficients in real-time according to the active note pitch and
@@ -1069,7 +1070,7 @@ void   NoiseLevelControl()
 
    Output variables:  v_coeff_xx  = real-time filter coeff's (4 fixed-point values)
 
- * *** todo: Implement remaining control modes  ***********************************
+   *** todo: Implement remaining control modes  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 */
 void   FilterFrequencyControl()
 {
@@ -1146,7 +1147,7 @@ void  AudioSamplingRoutine(void)
   fixed_t  reverbLPF;                   // output from reverb loop filter
   fixed_t  finalOutput;                 // output sample (to DAC)
 
-  TESTPOINT_SET_HIGH();    // for 'scope probe -- to measure ISR execution time
+  TESTPOINT_SET_HIGH();    // for 'scope probe -- to measure ASR execution time
 
   if (v_SynthEnable)
   {
@@ -1209,7 +1210,7 @@ void  AudioSamplingRoutine(void)
       }
       else  totalMixOut = MultiplyFixed(noiseGenOut, v_NoiseLevel);  // Noise only
     }
-    else if (m_Patch.FilterResonance)   // Filter enabled (FilterResonance != 0)
+    else if (m_Patch.FilterResonance)  // Filter enabled (FilterResonance != 0)
     {
       // Adjust waveMixerOut to a level which avoids overdriving the filter
       filterIn = (waveMixerOut * m_FilterAtten_pc) / 100;
@@ -1248,7 +1249,7 @@ void  AudioSamplingRoutine(void)
   else  finalOutput = 0;  // synth engine disabled
 
   // Audio DAC output (12 bits) -- update DAC register with sample value (1..3999).
-  // The DAC output is unipolar (0 to +3.3V), so a bias value (2000) is added to the sample.
+  // The DAC output is unipolar (0 to +3.3V), so a 50% bias (2000) is added to the sample.
   analogWrite(A14, 2000 + (int)(finalOutput >> 9));
 
   TESTPOINT_SET_LOW();
@@ -1257,23 +1258,6 @@ void  AudioSamplingRoutine(void)
 
 //=================================================================================================
 //                                    Sundry functions
-
-/*
-   Function:     Return TRUE if a Note is ON (gated), else FALSE.
-*/
-BOOL  isNoteOn()
-{
-  return  (m_Note_ON != 0);
-}
-
-/*
-   Function:     Get pointer to active patch table.
-*/
-PatchParamTable_t *GetActivePatchTable()
-{
-  return  &m_Patch;
-}
-
 /*
    Function:     Get ID number of active patch.
 */
@@ -1398,9 +1382,8 @@ fixed_t  Base2Exp(fixed_t xval)
   return  (fixed_t)(yval << 6);   // convert to 12:20 fixed-pt format
 }
 
-
 /*
-   Function:    S_curveTransform()
+   Function:    ScurveTransform()
 
    Overview:    Apply "S-curve" transform to a linear input value (point).
                 The curve is based on the middle half cycle of the sine function, inverted:
@@ -1412,7 +1395,7 @@ fixed_t  Base2Exp(fixed_t xval)
    
    Note:        Number of points in g_sinewave[] LUT = 1260;  peak value = 31680
    
-   To do: ****  Add LUT interpolation to improve precision.   <<<<<<<<<<<<<<<<<<< todo
+   To do:       Add LUT interpolation to improve precision.   <<<<<<<<<<<<<<<<<<<<<<< todo ???
                 (based on "virtual LUT" with 8 x number of points, i.e. 8 x 1260)
 */
 fixed_t  ScurveTransform(unsigned point)
@@ -1423,3 +1406,5 @@ fixed_t  ScurveTransform(unsigned point)
   // Scale to and convert 15-bit integer to fixed-pt (20-bit fraction)
   return  (fixed_t) ((32767 * yval) / 31680) << 5;  
 }
+
+// end-of-file
