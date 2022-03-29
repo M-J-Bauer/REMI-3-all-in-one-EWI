@@ -7,4 +7,6 @@ A complete description can be found in the web-page here: http://www.mjbauer.biz
 
 Makers who would prefer a simpler EWI design with MIDI controller capability, but without the built-in synthesizer, speaker, etc, may be interested in the REMI mk2 "handset", which is described here: http://www.mjbauer.biz/Build_the_REMI_mk2.htm
 
+REMI 3 software is built under the Arduino IDE with Teensyduino support package. The Arduino development environment, while not ideal (from a professional software engineer's point of view), provides the quickest and easiest path to completion.
+
 Note: GitHub thinks the REMI 3 source code comprises mostly C++ language (95%) because it is compiled under the Arduino IDE with many library functions written in C++. In fact, the REMI application code is composed of 100% pure C-langauge (no C++).
