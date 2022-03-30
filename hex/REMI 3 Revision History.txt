@@ -1,0 +1,18 @@
+REMI 3 Software Revision History
+_________________________________________________________________________________________
+
+v1.1.00  2022-03-18 :: First public release
+````````````````````````````````````````````
+Works well, quite playable, but not quite complete.
+(Best presets are 1, 2, 5, 6 and 8.)
+
+The IIC pitch-bend sensor code is yet to be implemented. 
+The motion sensor idea is experimental anmd it remains unproven.
+
+Some of the instrument patches are preliminary. 
+These will be refined in subsequent software releases.
+The best 8 patches will be assigned to the 8 presets.
+
+There is some (low level) "random" noise in the audio output, to be investigated.
+It may be coming from the pressure sensor. A smoothing filter may be needed.
+
