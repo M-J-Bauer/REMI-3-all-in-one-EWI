@@ -9,8 +9,8 @@ Makers who would prefer a simpler EWI design with MIDI controller capability, bu
 
 REMI 3 software is built under the Arduino IDE with Teensyduino support package. The Arduino development environment, while not ideal (from a professional software engineer's point of view), provides the quickest and easiest path to completion.
 
-To build the firmware, simply create a folder named "remi_3" on your PC. Download and install Arduino IDE and the Teenyduino library. Copy all source files (#.ino, #.h) to the remi_3 folder. Open the main file "remi_3.ino" in Arduino IDE.
+To build the firmware, download and install Arduino IDE and the Teensyduino library on your PC. Create a folder named "remi_3". Copy all source files (#.ino, #.h) to the folder. Open the main file "remi_3.ino" with Arduino IDE. Each file will appear under its own editor tab, but the entire set of files is regarded as a single "sketch" in Arduino.
 
-_You are welcome to post comments in the Discussions section.
+_You are welcome to post comments in the Discussions section._
 
 Note: GitHub thinks the REMI 3 source code comprises mostly C++ language (95%) because it is compiled under the Arduino IDE with many library functions written in C++. In fact, the REMI application code is composed of 100% pure C-langauge (no C++).
