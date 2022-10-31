@@ -83,8 +83,8 @@ typedef void (* pfnvoid)(void);     // pointer to void function
 
 
 // Macros for manipulating 32-bit (12:20) fixed-point numbers, type fixed_t.
-// Integer part:    12 bits, signed, max. range +/-2047
-// Fractional part: 20 bits, precision: +/-0.000001 (approx.)
+// Integer part:      12 bits, signed, max. range +/-2047
+// Fractional part:   20 bits, precision: +/-0.000001 (approx.)
 //
 #define IntToFixedPt(i)     (i << 20)                    // convert int to fixed-pt
 #define FloatToFixed(r)     (fixed_t)(r * 1048576)       // convert float (r) to fixed-pt

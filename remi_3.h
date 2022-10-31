@@ -14,23 +14,23 @@
 //                       FIRMWARE VERSION NUMBER AND BUILD OPTIONS
 //
 #define BUILD_VER_MAJOR   1
-#define BUILD_VER_MINOR   1
-#define BUILD_VER_DEBUG   0
+#define BUILD_VER_MINOR   2
+#define BUILD_VER_DEBUG   10
 //
 // =======================================================================================
 
 #include "remi_system_def.h"
-#include "remi_teensy_synth.h"
+#include "remi_3_synth.h"
 #include "oled_display_lib.h"
 
 #define AUTO_SHUTDOWN_TIMEOUT     120      // seconds with no user activity
 #define NUMBER_OF_TOUCH_INPUTS     10      // Maximum 12
 #define TOUCH_SENSE_THRESHOLD    2000      // 2500 == 50pF;  Sense time: 0.25ms per 33pF
-#define MODULATION_MAXIMUM       4095      // ADC counts  <<<<<<<<<<<<<<<<<<<<<<<  TBD  <<<<<<<<<<<<
-#define MODULATION_DEADBAND      1000      // ADC counts  <<<<<<<<<<<<<<<<<<<<<<<  TBD  <<<<<<<<<<<<
+#define MODULATION_MAXIMUM       4000      // ADC counts 
+#define MODULATION_DEADBAND      3000      // ADC counts 
 
 #define ANALOG_FULL_SCALE        4095      // for ADC resolution of 12 bits
-#define NOTE_ON_VELOCITY_DELAY     10      // Delay (ms) from note trigger to get velocity
+#define NOTE_ON_VELOCITY_DELAY     15      // Delay (ms) from note trigger to get velocity
 #define MIDI_EXPRN_CC               2      // 2:Breath-pressure, 7:Channel-volume, 11:Expression
 #define MIDI_MODN_MSG_INTERVAL     30      // unit = ms
 
@@ -101,14 +101,12 @@ enum  Values_for_Display_Menu_Item
   DISPLAY_PRESET,
   DISPLAY_VIBRATO,
   DISPLAY_REVERB,
-  DISPLAY_LEGATO,     // todo
   DISPLAY_PITCHBEND,  // todo
   DISPLAY_SPEAKER,
   DISPLAY_BATTERY,
   DISPLAY_SHUTDOWN,
   DISPLAY_SYSINFO,
   DISPLAY_PRESSURE,
-  DISPLAY_CHANNEL,    // todo
   DISPLAY_UNDEF
 };
 
@@ -127,7 +125,7 @@ typedef struct Eeprom_block_structure
   uint32  checkDword;               // Constant used to check data integrity
   
   uint8   MidiOutChannel;           // MIDI OUT channel (1..16, default 1)
-  bool    MidiLegatoModeEnabled;    // MIDI Legato Mode Enabled (0)
+  bool    MidiLegatoModeEnabled;    // MIDI Legato Mode Enabled (1)
   bool    VelocitySenseEnabled;     // Velocity sensing enabled (0)
   bool    PitchBendEnabled;         // Pitch Bend control enabled (0)
   uint8   VibratoMode;              // Vibrato control mode (0, 1, 2,..)

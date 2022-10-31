@@ -5,7 +5,7 @@
 
    Processor:   Freescale MK20DX256 ARM Cortex M4  (F_CPU = 72 MHz)
 
-   Platform:    Teensy 3.2 microcontroller dev board
+   Platform:    Teensy3.2 microcontroller dev board (PJRC)
 
    Toolchain:   Arduino IDE with Teensyduino support package
 
@@ -19,8 +19,13 @@
 //
 EepromBlock_t  g_Config;      // structure holding configuration param's
 
+//------------------- PRESET:   8   1   2   3   4   5   6   7
+uint8  defaultSynthPatch[]  = { 41, 10, 11, 21, 26, 48, 45, 40 };
+
 // Array of touch readings corresponding to touch-pad pins (for diagnostics only):
 uint16  touchReadings[12];
+
+extern  int32   g_debugValue;
 
 // --------------  Operational variables  ----------------------
 //
@@ -48,8 +53,8 @@ static  uint16  PressureQuiescent;
 static  uint16  PressureThresholdNoteOn;
 static  uint16  PressureThresholdNoteOff;
 static  uint16  ModulationSensorReading;
-static  uint16  PitchBendSensorReading;
-static  uint16  PitchBendZeroLevel;
+//static  uint16  PitchBendSensorReading;
+//static  uint16  PitchBendZeroLevel;
 static  uint16  BatteryVoltage_mV;
 static  uint16  TouchPadScanTime_ms;  // (diagnostic usage only)
 
@@ -93,11 +98,15 @@ void  setup(void)
     StartupErrorCode |= ERROR_CALIBRATING_SENSOR;
   }
 
+  g_Config.MidiOutChannel = 1;  // Not settable via UI in this version (temp.)
+  g_Config.MidiLegatoModeEnabled = TRUE;  // ..   ..   ..
+  g_Config.VelocitySenseEnabled = FALSE;  // ..   ..   ..
+
   // Restore synth settings to Preset last selected and start synth engine
-  RemiSynthAudioInit();
+  SynthAudioInit();
+  SynthReverbLevelSet(g_Config.ReverbMix_pc);
+  SynthVibratoModeSet(g_Config.VibratoMode);
   PresetSelect(g_Config.PresetLastSelected);
-  RemiSynthReverbLevelSet(g_Config.ReverbMix_pc);
-  RemiSynthVibratoModeSet(g_Config.VibratoMode);
 
   OLED_Display_Init();
   delay(100);   // for OLED on-board power to stabilize
@@ -123,26 +132,26 @@ void  setup(void)
 //
 void  loop(void)
 {
-  static  uint32  taskIntervalStart_TouchSense;
+  static  uint32  taskIntervalStart50us;
   static  uint32  taskPeriodStart1ms;
   static  uint32  taskPeriodStart5ms;
   static  uint32  taskPeriodStart50ms;
   static  uint8   ledFlashTimer;
-  static  uint8   taskTimer250ms;
+  static  uint8   taskTimer200ms;
 
-  // A *minimum* time interval of 50 microseconds is interposed between successive
+  // A time interval of 50 microsec (minimum) is interposed between successive
   // calls to the TouchPad Monitor routine.  The interval may be longer than 50us,
   // depending on other tasks' execution times.
-  if ((micros() - taskIntervalStart_TouchSense) >= 50)
+  if ((micros() - taskIntervalStart50us) >= 50)
   {
-    taskIntervalStart_TouchSense = micros();
     TouchPad_Monitor();
+    taskIntervalStart50us = micros();
   }
 
   if ((micros() - taskPeriodStart1ms) >= 1000)  // Do 1ms (1000us) periodic task
   {
     taskPeriodStart1ms = micros();
-    RemiSynthProcess();
+    SynthProcess();
   }
 
   if ((millis() - taskPeriodStart5ms) >= 5)  // Do 5ms periodic tasks...
@@ -150,28 +159,23 @@ void  loop(void)
     taskPeriodStart5ms = millis();
     ButtonScan();
     PressureSensorReading = analogRead(BREATH_SENSOR_PIN);
+    ModulationSensorReading = analogRead(MODN_PAD_PIN);
     if (!DiagnosticModeEnabled) NoteOnOffStateTask();
   }
 
   if ((millis() - taskPeriodStart50ms) >= 50)  // Do 50ms periodic tasks...
   {
     taskPeriodStart50ms = millis();
-    ModulationSensorReading = analogRead(MODN_PAD_PIN);
     if (TouchPadStates != 0) UserInactiveTimer_sec = 0;  // Reset UI time-out
+    if (!DiagnosticModeEnabled) Player_UI_Service();
     
-//  PitchBendAutoZero();  // TODO   <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-    if (!DiagnosticModeEnabled) 
+    if (++taskTimer200ms >= 4)  // Do 200ms periodic tasks...
     {
-      Player_UI_Service();
-      DisplayUpdate();
-    }
-
-    if (++taskTimer250ms >= 5)  // Do 250ms periodic tasks...
-    {
-      taskTimer250ms = 0;
+      taskTimer200ms = 0;
       CheckPowerSource();
       CheckHeadphonePlug();
       if (DiagnosticModeEnabled) DiagnosticService();
+      else  DisplayUpdate();
     }
 
     HEARTBEAT_LED_OFF();
@@ -180,13 +184,13 @@ void  loop(void)
     if (++ledFlashTimer >= 40)  // Every 2 seconds...
     {
       ledFlashTimer = 0;
-      HEARTBEAT_LED_ON();  // LED period = 2 sec. (Duty = 50ms)
+ //   HEARTBEAT_LED_ON();  // LED period = 2 sec, duty = 50ms (debug usage)
       if (!USB_powered && LowBatteryFlag) BATT_LED_ON(); 
       UserInactiveTimer_sec += 2;
     }
   }
 
-  if (MIDI_enabled)  { usbMIDI.read(); }  // Read and discard MIDI IN messages
+  if (MIDI_enabled)  usbMIDI.read();  // Read and discard MIDI IN messages
 
   if (ButtonPressTime_ms > 5000) ShutdownFlag = TRUE;  // Force shut-down
 }
@@ -265,6 +269,7 @@ void  CheckPowerSource()
     threshold_mV = (threshold_mV * 90) / 100;  // 90% of low-voltage warning -> shut down
     if (BatteryVoltage_mV < threshold_mV) ShutdownFlag = TRUE;
   }
+  
   // Check auto-shutdown timer (only when battery-powered)
   if (!DiagnosticModeEnabled && !USB_powered 
   && (UserInactiveTimer_sec > AUTO_SHUTDOWN_TIMEOUT))
@@ -273,6 +278,7 @@ void  CheckPowerSource()
     BATT_EN_NEGATE();  // Switch off battery power supply
     delay(5000);
   }
+  
   // Check sensibility of battery type (config. param.)
   if (g_Config.BatteryType != 0 && BatteryVoltage_mV > 2700)
   {
@@ -283,26 +289,15 @@ void  CheckPowerSource()
 }
 
 
+// Function to monitor headphone jack...
+// If headphone plug is inserted, mute the internal speaker;
+// else if headphone plug removed, restore last state of speaker
+//
 void   CheckHeadphonePlug()
 {
-  static bool previouslyPluggedIn;  // True if h/phone plug detected on last call
-  static bool initDone;
-
-  if (!initDone)  // once off initialization
-  {
-    previouslyPluggedIn = HEADPHONE_PLUGGED_IN;
-    initDone = TRUE;
-    return;
-  }
-  // If headphone plug is inserted, mute the internal speaker;
-  // else if headphone plug removed (event) detected, restore last state of speaker.
   if (HEADPHONE_PLUGGED_IN) SPEAKER_DISABLE();
-  else if (previouslyPluggedIn && !HEADPHONE_PLUGGED_IN) // 'unplugged' event
-  {
-    if (SpeakerEnabled) SPEAKER_ENABLE();
-    else  SPEAKER_DISABLE();
-  }
-  previouslyPluggedIn = HEADPHONE_PLUGGED_IN;  // update plug status
+  else if (SpeakerEnabled) SPEAKER_ENABLE();
+  else  SPEAKER_DISABLE();
 }
 
 
@@ -313,7 +308,7 @@ void   CheckHeadphonePlug()
 
   Global variable 'TouchPadStates' holds the de-glitched logic states of the touch-pads.
       bit:   9    8    7    6    5    4    3    2    1    0
-      pad:  OCT+ OCT- LH1  LH2  LH3  LH4  RH1  RH2  RH3  RH4
+      pad:  OCT+ OCT- LH1  LH2  LH3  RH1  RH2  RH3  RH4  LH4
 
   A time-out is imposed on the wait time to read each input, because if a pad is touched,
   the effective capacitance to ground may be quite high (> 1000pF) resulting in excessive
@@ -484,7 +479,6 @@ void  NoteOnOffStateTask()
             OLED_Display_Sleep();
             DisplayEnabled = FALSE;
           }
-          if (SpeakerEnabled && !HEADPHONE_PLUGGED_IN) SPEAKER_ENABLE();
           stateTimer_ms = 0;    // start delay for velocity acquisition
           NoteOnOffState = NOTE_ON_PENDING;
         }
@@ -513,7 +507,7 @@ void  NoteOnOffStateTask()
 
         if (doSendNoteOn)
         {
-          RemiSynthNoteOn(noteNumber, velocity);
+          SynthNoteOn(noteNumber, velocity);
           if (MIDI_enabled) usbMIDI.sendNoteOn(noteNumber, velocity, midiChan);
           noteNumPlaying = noteNumber;
           NoteOnOffState = NOTE_ON_PLAYING;
@@ -526,7 +520,7 @@ void  NoteOnOffStateTask()
         // pressure threshold.
         if (PressureSensorReading < PressureThresholdNoteOff)
         {
-          RemiSynthNoteOff();
+          SynthNoteOff();
           if (MIDI_enabled) usbMIDI.sendNoteOff(noteNumPlaying, 0, midiChan);
           NoteOnOffState = NOTE_OFF_IDLE;
           break;
@@ -536,7 +530,8 @@ void  NoteOnOffStateTask()
         // this signals a "Legato" note change.  Remain in this state.
         if (isValidNote && (noteNumber != noteNumPlaying))
         {
-          RemiSynthNoteOn(noteNumber, velocity);
+          SynthNoteOn(noteNumber, velocity);  // REMI synth: legato always enabled
+		  
           if (MIDI_enabled && g_Config.MidiLegatoModeEnabled)
           {
             usbMIDI.sendNoteOn(noteNumber, velocity, midiChan);  // New note ON
@@ -557,21 +552,21 @@ void  NoteOnOffStateTask()
         pitch_bend_14b = GetPitchBendData();
 
         // Update synth expression (pressure), modulation and pitch-bend signals
-        RemiSynthExpression(pressure_14b);
-        RemiSynthModulation(modulation_14b);
-        RemiSynthPitchBend(pitch_bend_14b);
+        SynthExpression(pressure_14b);
+        SynthModulation(modulation_14b);
+        SynthPitchBend(pitch_bend_14b);
 
         // Send MIDI expression (breath pressure) message on CC02 (every 5ms)
         if (MIDI_enabled) usbMIDI.sendControlChange(MIDI_EXPRN_CC, pressure_Hi, midiChan);
 
         // Send other MIDI control-change messages (when pending)
+        controllerUpdateTimer_ms += 5;
         if (MIDI_enabled && controllerUpdateTimer_ms >= MIDI_MODN_MSG_INTERVAL)
         {
           usbMIDI.sendControlChange(1, modulation_Hi, midiChan);
           usbMIDI.sendPitchBend(pitch_bend_14b, midiChan);
           controllerUpdateTimer_ms = 0;
         }
-        controllerUpdateTimer_ms += 5;
         break;
       }
     default:
@@ -593,7 +588,7 @@ void  PresetSelect(uint8 preset)
   preset = preset & 7;  // preset index must be 0..7
 
   // Load and activate the REMI synth patch assigned to this Preset...
-  RemiSynthPatchSelect(g_Config.PresetPatchNum[preset]);
+  SynthPatchSelect(g_Config.PresetPatchNum[preset]);
 
   g_Config.PresetLastSelected = preset;  // Save this Preset for next power-on
   StoreConfigData();
@@ -623,11 +618,15 @@ void   Player_UI_Service()
   {
     ButtonHitFlag = 0;
     UserInactiveTimer_sec = 0;  // Reset UI time-out
-
-    if (TouchPadStates == 0)
+    if (!DisplayEnabled)
     {
       OLED_Display_Wake();
       DisplayEnabled = TRUE;
+    }
+
+    if (TouchPadStates == 0)  // No pad touched
+    {
+      SynthAudioInit();  // Disable synth -- All sound off
       LastDisplayItem = DISPLAY_UNDEF;  // trigger idle/menu screen
       SPEAKER_DISABLE();  // mute speaker (OLED IIC bus activity causes audio noise)
     }
@@ -666,64 +665,59 @@ void   Player_UI_Service()
       else if (g_Config.VibratoMode == 1) g_Config.VibratoMode = 2;
       else  g_Config.VibratoMode = 0;   // OFF
       StoreConfigData();
-      RemiSynthVibratoModeSet(g_Config.VibratoMode);
+      SynthVibratoModeSet(g_Config.VibratoMode);
     }
     else if (TouchPadStates == LH3) 
     {
-        // Set Pitch Bend -- Toggle on/off (Other synth PB modes not supported)
+      // Set Pitch Bend -- Toggle on/off (Other synth PB modes not supported)
       g_Config.PitchBendEnabled = !g_Config.PitchBendEnabled;
       StoreConfigData();
-        if (g_Config.PitchBendEnabled) RemiSynthPitchBendModeSet(1);
-        else  RemiSynthPitchBendModeSet(0);
+      if (g_Config.PitchBendEnabled) SynthPitchBendModeSet(1);
+      else  SynthPitchBendModeSet(0);
     }   
     else if (TouchPadStates == RH3)
     {
       // Set reverb level (scroll up thru 8 fixed steps)
-      for (idx = 0; idx < sizeof(reverbStep); idx++)
+      for (idx = 0; idx < (int)sizeof(reverbStep); idx++)
       {
         if (g_Config.ReverbMix_pc == reverbStep[idx]) break;
       }
-      if (++idx >= sizeof(reverbStep)) idx = 0;
+      if (++idx >= (int)sizeof(reverbStep)) idx = 0;
       g_Config.ReverbMix_pc = reverbStep[idx];
       StoreConfigData();
-      RemiSynthReverbLevelSet(g_Config.ReverbMix_pc);
+      SynthReverbLevelSet(g_Config.ReverbMix_pc);
     }
     else if (TouchPadStates == RH4 && !HEADPHONE_PLUGGED_IN) 
     {
-      SpeakerEnabled = !SpeakerEnabled;  // toggle state
+      SpeakerEnabled = !SpeakerEnabled;  // toggle speaker on/off
       if (SpeakerEnabled) SPEAKER_ENABLE();  // update SPKR_EN output
       else SPEAKER_DISABLE();
     }
-    else if (TouchPadStates == (LH3 + LH4))
+    else if (TouchPadStates == (RH3 + RH4))  // toggle battery type
     {
-      g_Config.MidiLegatoModeEnabled = !g_Config.MidiLegatoModeEnabled;  
-      StoreConfigData();
-    }
-    else if (TouchPadStates == (RH3 + RH4))
-    {
-      g_Config.BatteryType ^= 1;   // Toggle... 0: Alkaline, 1:NiMH
+      g_Config.BatteryType ^= 1;   // 0: Alkaline, 1:NiMH
       StoreConfigData();
     }
     else if (TouchPadStates == (LH3 + RH1))
     {
-      g_Config.PressureFullScale = PressureSensorReading; 
+      g_Config.PressureFullScale = PressureSensorReading;  // set max. pressure
       StoreConfigData();
     }
-    else if (TouchPadStates == (LH4 + RH4)) ShutdownFlag = TRUE;
+    else if (TouchPadStates == (LH3 + LH4)) ShutdownFlag = TRUE;  // shut down
     
   } // end if (ButtonHitFlag())
 }
 
 /*
    Routine to update the graphical OLED display during normal operating mode.
-   Background task called at 50 millisecond intervals.
+   Background task called at 200 millisec intervals (5 times/sec).
 
-   The display is normally blanked out;  it is activated by any touch-pad(s) touched;
-   also for a fixed time during start-up and shut-down (on battery power).
+   The display is normally blanked out;  it is activated by pressing the SET button;
+   also momentarily for device start-up and battery power-off sequences.
 
    While activated, the display shows the "menu" item selected by the touch-pad(s) that
    are currently touched, if any, with the current value of the respective parameter
-   or operational variable. It also shows what will happen if the PRE/SET button is hit.
+   or operational variable. It also shows what will happen if the SET button is hit.
 */
 void  DisplayUpdate()
 {
@@ -737,46 +731,34 @@ void  DisplayUpdate()
     Disp_ClearScreen();
     OLED_Display_Sleep();
     DisplayEnabled = FALSE;
-//  LastDisplayItem = DISPLAY_UNDEF;
-    if (SpeakerEnabled && !HEADPHONE_PLUGGED_IN) SPEAKER_ENABLE();
   }
 
   if (TouchPadStates == 0) displayItem = DISPLAY_PROMPT;
-  else if (TouchPadStates == OCT_UP || TouchPadStates == OCT_DN)
+  else if (TouchPadStates == OCT_UP || TouchPadStates == OCT_DN || TouchPadStates == (OCT_UP + OCT_DN))
     displayItem = DISPLAY_OCTAVE;
-  else if (TouchPadStates == (LH1 + LH2)
-  || TouchPadStates == LH1 || TouchPadStates == LH2)
+  else if (TouchPadStates == (LH1 + LH2) || TouchPadStates == LH1 || TouchPadStates == LH2)
     displayItem = DISPLAY_TRANSPOSE;
-  else if (TouchPadStates == (RH1 + RH2)
-  || TouchPadStates == RH1 || TouchPadStates == RH2)
+  else if (TouchPadStates == (RH1 + RH2) || TouchPadStates == RH1 || TouchPadStates == RH2)
     displayItem = DISPLAY_PRESET;
-  else if (TouchPadStates == LH3)  displayItem = DISPLAY_PITCHBEND;
+  else if (TouchPadStates == LH3)  displayItem = DISPLAY_PITCHBEND;  // todo  ***************
   else if (TouchPadStates == LH4)  displayItem = DISPLAY_VIBRATO;
   else if (TouchPadStates == RH3)  displayItem = DISPLAY_REVERB;
   else if (TouchPadStates == RH4)  displayItem = DISPLAY_SPEAKER;
-  else if (TouchPadStates == (LH3 + LH4))  displayItem = DISPLAY_LEGATO;
+  else if (TouchPadStates == (LH3 + LH4))  displayItem = DISPLAY_SHUTDOWN;
   else if (TouchPadStates == (RH3 + RH4))  displayItem = DISPLAY_BATTERY;
-  else if (TouchPadStates == (LH4 + RH4))  displayItem = DISPLAY_SHUTDOWN;
   else if (TouchPadStates == (LH3 + RH3))  displayItem = DISPLAY_SYSINFO;
   else if (TouchPadStates == (LH3 + RH1))  displayItem = DISPLAY_PRESSURE;
   else  displayItem = DISPLAY_IDLE;  // No valid touch-pad combo selected
 
   if (displayItem != LastDisplayItem)
   {
+	  isNewScreen = TRUE;
     Disp_ClearScreen();  // prepare new screen
     Disp_PosXY(0, 13);
     Disp_DrawLineHoriz(128);
     LastDisplayItem = displayItem;
-    isNewScreen = TRUE;
   }
-/*
-  if ((displayItem != DISPLAY_IDLE) && !DisplayEnabled)
-  {
-    OLED_Display_Wake();
-    DisplayEnabled = TRUE;
-    SPEAKER_DISABLE();
-  }
-*/
+
   switch (displayItem)
   {
     case DISPLAY_PROMPT:
@@ -875,6 +857,7 @@ void  DisplayPrompt(bool prep)
 void  DisplayOctaveShift(bool prep)
 {
   static int  lastValueShown;
+  static int  previousTouchPadStates;
 
   if (prep)  // prepare new screen
   {
@@ -882,10 +865,10 @@ void  DisplayOctaveShift(bool prep)
     Disp_SetFont(PROP_8_NORM);
     Disp_PosXY(84, 28);
     Disp_PutText("octave");
-    lastValueShown = 999;  // bad value forces data refresh
+    lastValueShown = 999;  // force data refresh
   }
-  // Update variable data, but only if it has changed...
-  if (OctaveShift != lastValueShown)
+
+  if (OctaveShift != lastValueShown || TouchPadStates != previousTouchPadStates)
   {
     Disp_PosXY(48, 18);
     Disp_ClearArea(32, 20);
@@ -895,7 +878,7 @@ void  DisplayOctaveShift(bool prep)
     Disp_PutDecimal(OctaveShift/12, 1);  // OctaveShift = semitones
     lastValueShown = OctaveShift;
 
-    // Show 'SET' button action
+    // Show 'SET' button action (none if both pads touched)
     Disp_PosXY(16, 48);
     Disp_ClearArea(96, 16);
     if (TouchPadStates == OCT_UP && OctaveShift < 1)
@@ -903,6 +886,7 @@ void  DisplayOctaveShift(bool prep)
     if (TouchPadStates == OCT_DN && OctaveShift > -1)
         DisplayTextCenteredInBox(48, "Down (-1)");
   }
+  previousTouchPadStates = TouchPadStates;
 }
 
 
@@ -1006,17 +990,17 @@ void  DisplayVibrato(bool prep)
     Disp_PutText("Control Mode");
     // Show 'SET' button action (constant)
     DisplayTextCenteredInBox(48, "Change");
-    lastValueShown = 999;
+    lastValueShown = 999;  // force refresh
   }
   // Update variable data, but only if it has changed...
   if (vibMode != lastValueShown)
   {
-    Disp_PosXY(32, 32);
-    Disp_ClearArea(64, 12);
+    Disp_PosXY(24, 32);
+    Disp_ClearArea(96, 12);
     Disp_SetFont(PROP_12_BOLD);
-    if (vibMode == 0) Disp_PutText("  OFF  ");
-    if (vibMode == 1) Disp_PutText("Mod.Pad");
-    if (vibMode == 2) Disp_PutText(" Auto. ");
+    if (vibMode == 0) Disp_PutText("   OFF   ");
+    if (vibMode == 1) Disp_PutText(" Mod.Pad ");
+    if (vibMode == 2) Disp_PutText("Auto-ramp");
     lastValueShown = vibMode;
   }
 }
@@ -1094,20 +1078,24 @@ void  DisplayBattery(bool prep)
     DisplayTextCentered12p(0, "Battery");  // title bar
     // Show 'SET' button action (constant)
     DisplayTextCenteredInBox(48, "Set Type");
-    lastValueShown = 255;
+    lastValueShown = 255;  // force refresh
   }
   // Update variable data, but only if it has changed...
   if (g_Config.BatteryType != lastValueShown)
   {
-    Disp_PosXY(0, 16);  // ???
-    Disp_ClearArea(128, 32);  // ???
+    Disp_PosXY(0, 16); 
+    Disp_ClearArea(128, 32); 
 
     Disp_SetFont(PROP_8_NORM);
     Disp_PosXY(0, 20);
     Disp_PutText("Status:  ");
-    Disp_SetFont(MONO_8_NORM);
+    if (!USB_powered)
+    {
+      Disp_SetFont(MONO_8_NORM);
       if (LowBatteryFlag) Disp_PutText("LOW !");  
       else  Disp_PutText("Good");
+    }
+    else  Disp_PutText("N/A");
 
     // Show battery voltage in format "#.##V" -- without using sprintf()
     Disp_SetFont(PROP_12_NORM);
@@ -1158,7 +1146,9 @@ void  DisplaySystemInfo(bool prep)
 
     Disp_SetFont(PROP_8_NORM);
     Disp_PosXY(0, 16);
-    Disp_PutText("...");  // reserved line (TBD)
+    Disp_PutText("Debug Value: "); 
+    Disp_SetFont(MONO_8_NORM);
+    Disp_PutDecimal(g_debugValue, 5);
 
     Disp_SetFont(PROP_8_NORM);
     Disp_PosXY(0, 26);
@@ -1190,7 +1180,7 @@ void  DisplayPressure(bool prep)
   
   if (prep)  // once only
   {
-    DisplayTextCentered12p(0, "Max.Pressure");  // title bar
+    DisplayTextCentered12p(0, "Max Pressure");  // title bar
 
     Disp_SetFont(PROP_8_NORM);
     Disp_PosXY(0, 28);
@@ -1264,9 +1254,11 @@ void  DiagnosticService()
   static short diagnosticStep;
   static bool prepDone; 
   static bool doRefresh;  // True => refresh display (static content)
+  static bool presetsDefaulted;
 
   if (!prepDone)  // One-time initialization
   {
+    OLED_Display_Wake();
     Disp_ClearScreen();
     Disp_SetFont(PROP_12_NORM);
     Disp_PosXY(0, 0); 
@@ -1277,7 +1269,7 @@ void  DiagnosticService()
       Disp_PutText("Error code: ");
       Disp_PutHexByte((uint8)StartupErrorCode);
     }
-    else  Disp_PutText("( No errors :)");
+    else  Disp_PutText("* No errors *");
     Disp_PosXY(0, 32);
     Disp_PutText("VBUS.DET: ");
     if (USB_VBUS_DETECTED) Disp_PutText("High  ");
@@ -1285,6 +1277,7 @@ void  DiagnosticService()
 
     DisplayTextCenteredInBox(48, "Next");
     diagnosticStep = -1;  // until button hit
+    presetsDefaulted = FALSE;
     doRefresh = TRUE;
     prepDone = TRUE;
   }
@@ -1326,64 +1319,89 @@ void  DiagnosticService()
   }
   else if (diagnosticStep == 1)
   {
-    // Show sensor readings (in raw ADC units)
+    // Show sensor readings
+    if (doRefresh)
+    {
+      Disp_SetFont(PROP_8_NORM);
+      Disp_PosXY(0, 0);
+      Disp_PutText("Pressure (ADC):");
+      Disp_PosXY(0, 12);
+      Disp_PutText("Quiescent (ADC):");
+      Disp_PosXY(0, 24);
+      Disp_PutText("Maximum (ADC):");
+      Disp_PosXY(0, 36);
+      Disp_PutText("Modn.Pad (MIDI):");
+      doRefresh = 0;
+    }
+    
+    Disp_SetFont(MONO_8_NORM);
+    Disp_PosXY(92, 0);
+    Disp_ClearArea(36, 8);
+    Disp_PutDecimal(PressureSensorReading, 5);
+    
+    Disp_PosXY(92, 12);
+    Disp_ClearArea(36, 8);
+    Disp_PutDecimal(PressureQuiescent, 5);
+    
+    Disp_PosXY(92, 24);
+    Disp_ClearArea(36, 8);
+    Disp_PutDecimal(g_Config.PressureFullScale, 5);
+    
+    Disp_PosXY(92, 36);
+    Disp_ClearArea(36, 8);
+    Disp_PutDecimal(GetModulationPadForce(), 5);
+  }
+  else if (diagnosticStep == 2)
+  {
     if (doRefresh)
     {
       Disp_SetFont(PROP_12_NORM);
       Disp_PosXY(0, 0);
-      Disp_PutText("Pressure:");
-      Disp_PosXY(0, 13);
-      Disp_PutText("Quiescent:");
-      Disp_PosXY(0, 26);
-      Disp_PutText("Maximum: ");
-      Disp_PosXY(0, 39);
-      Disp_PutText("Modn Pad:");
+      Disp_PutText("Restore default");
+      Disp_PosXY(0, 16);
+      Disp_PutText("synth presets ?");
+      Disp_PosXY(0, 32);
+      Disp_PutText("(Touch RH1+2+3)");
+      DisplayTextCenteredInBox(48, "Yes/Next");
       doRefresh = 0;
     }
-    
-    Disp_PosXY(80, 0);
-    Disp_ClearArea(48, 12);
-    Disp_PutDecimal(PressureSensorReading, 4);
-    
-    Disp_PosXY(80, 13);
-    Disp_ClearArea(48, 12);
-    Disp_PutDecimal(PressureQuiescent, 4);
-    
-    Disp_PosXY(80, 26);
-    Disp_ClearArea(48, 12);
-    Disp_PutDecimal(g_Config.PressureFullScale, 4);
-    
-    Disp_PosXY(80, 39);
-    Disp_ClearArea(48, 12);
-    Disp_PutDecimal(ModulationSensorReading, 4);
+    if (presetsDefaulted)  // Once only
+    {
+      Disp_ClearScreen(); 
+      Disp_SetFont(PROP_12_NORM);
+      Disp_PosXY(0, 8);
+      Disp_PutText("Presets");
+      Disp_PosXY(0, 24);
+      Disp_PutText("restored OK!");
+      DisplayTextCenteredInBox(48, "Next");
+      presetsDefaulted = FALSE;
+    }
   }
-  else if (diagnosticStep == 2) 
+  else if (diagnosticStep == 3) 
   {
     // Test sound synthesizer operation (without Note ON/OFF task)
     if (doRefresh)
     {
       Disp_PosXY(0, 0);
       Disp_PutText("Sound test...");
-      RemiSynthPatchSelect(90);  // Select Test Patch (Osc1: sine wave;  Osc2: sawtooth)
-      RemiSynthVibratoModeSet(0);  // Override Preset
-      RemiSynthNoteOn(69, 64);  // Note ON, 69 = A4 (440Hz)
+      SynthPatchSelect(90);  // Select Test Patch (Osc1: sine wave;  Osc2: sawtooth)
+      SynthVibratoModeSet(0);  // Override Preset
+      SynthNoteOn(69, 64);  // Note ON, 69 = A4 (440Hz)
       doRefresh = 0;
     }
   }
-  else if (diagnosticStep == 3)  // Last step -- Repeat from step 1 (when SET hit)
+  else if (diagnosticStep == 4)  // Last step -- Repeat from step 0 (when SET hit)
   {
     if (doRefresh)
     {
-      RemiSynthNoteOff();  // finish last Step (synth sound test)
+      SynthNoteOff();  // finish previous Step (synth sound test)
       PresetSelect(g_Config.PresetLastSelected);
-      RemiSynthVibratoModeSet(g_Config.VibratoMode);
-      
+      SynthVibratoModeSet(g_Config.VibratoMode);
       Disp_PosXY(0, 0);
       Disp_PutText("UI timer:");
       Disp_PosXY(0, 13); 
       doRefresh = 0;
     }
-
     Disp_PosXY(80, 0);
     Disp_ClearArea(48, 12);
     Disp_PutDecimal(UserInactiveTimer_sec, 4);
@@ -1392,39 +1410,56 @@ void  DiagnosticService()
   if (ButtonHitFlag)
   {
     ButtonHitFlag = 0;
-    if (++diagnosticStep >= 4) diagnosticStep = 0; // next step
-    Disp_ClearScreen();  
-    Disp_SetFont(PROP_12_NORM);
-    Disp_PosXY(120, 52);  // bottom line, RHS corner
-    Disp_PutDecimal(diagnosticStep, 1);
-    doRefresh = TRUE;
+    if (diagnosticStep == 2 && TouchPadStates == (RH1 + RH2 + RH3))  
+    {
+      int i;
+      for (i = 0;  i < 8;  i++)  // Restore default presets
+        { g_Config.PresetPatchNum[i] = defaultSynthPatch[i]; }
+      StoreConfigData();
+      presetsDefaulted = TRUE;
+    }
+    else
+    {
+      if (++diagnosticStep > 4) diagnosticStep = 0; // next step
+      Disp_ClearScreen();  
+      Disp_SetFont(PROP_12_NORM);
+      Disp_PosXY(120, 52);  // bottom line, RHS corner
+      Disp_PutDecimal(diagnosticStep, 1);
+      doRefresh = TRUE;
+    }
   }
 }
 
 
 /*````````````````````````````````````````````````````````````````````````````````````````````````
-   Function:      Determine 14-bit pressure value from the pressure sensor ADC reading.
-                  May be used also to find MIDI velocity value from pressure.
+   Function:  Determine 14-bit pressure value from the pressure sensor ADC reading.
+              May be used also to find MIDI velocity value from pressure.
+			        Called at periodic intervals (5ms) in normal operation.
 
-   Note:          The function assumes a linear relationship between raw pressure reading
-                  and MIDI pressure (or velocity) value. The external MIDI sound module
-                  should apply an exponential transfer function between MIDI pressure and
-                  audio output signal amplitude.
+   Note:      The function assumes a linear relationship between raw pressure reading
+              and MIDI pressure (or velocity) value. The external MIDI sound module
+              should apply an exponential transfer function between MIDI pressure and
+              audio output signal amplitude.
 */
 uint16  GetBreathPressureLevel()
 {
+  static int32 pressureAccum;  // smoothed pressure (fixed-pt, 14:8 bits)
   int  level;
   uint16  rawSpan;  
 
-  // Calculate pressure as a 14-bit quantity, range 0 to 16256 (127 x 128)
+  // Calculate pressure as a 14-bit value, range 0 to 16256 (127 x 128)
   rawSpan = g_Config.PressureFullScale - PressureQuiescent;  // unit = ADC counts
   level = (16256 * (int32)(PressureSensorReading - PressureQuiescent)) / rawSpan;
-
   if (level < 0) level = 0;
   if (level > 16256)  level = 16256;
+  
+  // Apply smoothing filter (1st-order IIR, K = 0.25, Tc := 16ms)
+  level = level << 8;  // convert to fixed-point (14:8 bits)
+  pressureAccum = pressureAccum - (pressureAccum / 4) + (level / 4);
 
-  return (uint16) level;
+  return (uint16) (pressureAccum >> 8);  // return integer part (14b)
 }
+
 
 /*````````````````````````````````````````````````````````````````````````````````````````````````
    Function:  GetModulationPadForce()
@@ -1448,12 +1483,12 @@ uint16   GetModulationPadForce()
   linearVal = ModulationSensorReading - MODULATION_DEADBAND;
   if (linearVal < 0) linearVal = 0;
 
-  // Scale linearVal such that it spans the full range (0 ~ 16256)...
+  // Scale linearVal such that it spans the full range (0 ~ 16000)...
   rawSpan = MODULATION_MAXIMUM - MODULATION_DEADBAND;
-  linearVal = (16256 * linearVal) / rawSpan;
+  linearVal = (16000 * linearVal) / rawSpan;
 
-  compVal = (linearVal * linearVal) / 16256;   // Apply square-law transform
-  if (compVal > 16256)  compVal = 16256;       // Cap at 16256
+  compVal = (linearVal * linearVal) / 16000;   // Apply square-law transform
+  if (compVal > 16000)  compVal = 16000;       // Cap at 16000
 
   return  compVal;
 }
@@ -1516,19 +1551,17 @@ void  PitchBendAutoZero()
 /*`````````````````````````````````````````````````````````````````````````````````````````````````
    Function writes default values for player configuration data.
    These are "factory" defaults which are applied only in the event of erasure or
-   corruption of EEPROM memory data, including firmware update.
+   corruption of EEPROM memory data.
 */
 void  DefaultConfigData(void)
 {
-  //------------------------- PRESET:   8   1   2   3   4   5   6   7
-  static uint8 defaultSynthPatch[]  = { 41, 10, 11, 21, 26, 48, 45, 46 };
   int  i;
 
   g_Config.checkDword = 0xFEEDFACE;
   g_Config.EndOfDataBlockCode = 0xE0DBC0DE;
 
   g_Config.MidiOutChannel = 1;
-  g_Config.MidiLegatoModeEnabled = FALSE;
+  g_Config.MidiLegatoModeEnabled = TRUE;
   g_Config.VelocitySenseEnabled = FALSE;
   g_Config.VibratoMode = 0;  // OFF
   g_Config.ReverbMix_pc = 10;
@@ -1677,6 +1710,8 @@ int  touchSenseRead()
 }
 
 
+//=================================================================================================
+//
 // REMI logo bitmap image definition:  width: 85, height: 30 pixels
 //
 bitmap_t  remi_logo_85x30[] =
