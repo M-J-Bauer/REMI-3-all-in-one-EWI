@@ -7,7 +7,7 @@ A full description can be found in the doc folder. See also: http://www.mjbauer.
 
 Makers who would prefer a simpler EWI design with MIDI controller capability, but without the built-in synthesizer, speaker, etc, may be interested in the REMI mk2 "handset", which is described here: http://www.mjbauer.biz/Build_the_REMI_mk2.htm
 
-To build the firmware, install Arduino IDE 2.0 on your computer. Follow steps on the PRJC website to install Teensy library. Under "Tools/USB" choose MIDI. Create a folder named "remi_3". Copy all source files (#.ino, #.h) to the folder. Open the main file "remi_3.ino" with Arduino IDE. Each source file will appear under its own editor tab, but the entire set of files is regarded as a single "sketch". (Arduino IDE doesn't support modular programming properly.)
+To build the firmware, install Arduino IDE 2.0 on your computer. Follow steps on the PJRC website to install Teensy library. Under "Tools/USB" choose MIDI. Create a folder named "remi_3". Copy all source files (#.ino, #.h) to the folder. Open the main file "remi_3.ino" with Arduino IDE. Each source file will appear under its own editor tab, but the entire set of files is regarded as a single "sketch". (Arduino IDE doesn't support modular programming properly.)
 
 _You are welcome to post comments in the Discussions section._
 
