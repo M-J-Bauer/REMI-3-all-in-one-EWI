@@ -6,13 +6,48 @@ v1.1.00  2022-03-18 :: First public release
 Works well, quite playable, but not quite complete.
 (Best presets are 1, 2, 5, 6 and 8.)
 
-The IIC pitch-bend sensor code is yet to be implemented. 
-The motion sensor idea is experimental anmd it remains unproven.
-
 Some of the instrument patches are preliminary. 
 These will be refined in subsequent software releases.
 The best 8 patches will be assigned to the 8 presets.
 
 There is some (low level) "random" noise in the audio output, to be investigated.
 It may be coming from the pressure sensor. A smoothing filter may be needed.
+
+Settings not persistent. Always defaulted at start-up. (?)
+
+v1.2.20  2023-01-01
+```````````````````
+(Undocumented)
+
+
+v1.3.00  2023-07-28
+```````````````````
+Imported new patch & wave-table data from PIC32MX synth. 
+Updated default presets.
+Modified config and patch structures for PIC32MX compatibility.
+Updated filter frequency control routine for PIC32MX compatibility.
+
+The output of the expression level smoothing filter would not diminish to zero
+after the input expression level dropped to zero (at note off).
+Easy fix:  Forced the output level to zero when it drops below a set minimum.
+Note:  With reverb on, the signal will still linger for a second or two.
+
+
+_________________________________________________________________________________________
+
+To Do:
+``````
+Check settings are persistent. (Defaulted at start-up?)
+
+Pitch bend.
+
+Improve modulation control.
+
+_________________________________________________________________________________________
+
+Patch and wave-table usage:
+```````````````````````````
+Patches assigned to Presets [0:7]:  43, 10, 11, 21, 26, 45, 41, 42.
+Wave-tables used by above Patches:  2, 9, 11, 12, 13, 14,  17, 18.
+(Not in corresponding order)
 
