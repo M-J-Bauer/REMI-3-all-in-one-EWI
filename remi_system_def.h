@@ -19,7 +19,7 @@
 #include <ctype.h>
 #include <math.h>
 
-#define USE_CONSOLE_CLI  0    // CLI omitted in GEWI version
+#define USE_CONSOLE_CLI  0    // CLI omitted in REMI 3 version
 #define FIXED_POINT_FORMAT_12_20_BITS   // range: +/-2047,  precision: +/-0.000001
 
 #ifndef LITTLE_ENDIAN

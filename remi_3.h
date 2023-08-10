@@ -14,8 +14,8 @@
 //                       FIRMWARE VERSION NUMBER AND BUILD OPTIONS
 //
 #define BUILD_VER_MAJOR   1
-#define BUILD_VER_MINOR   2
-#define BUILD_VER_DEBUG   10
+#define BUILD_VER_MINOR   3
+#define BUILD_VER_DEBUG   0
 //
 // =======================================================================================
 
@@ -33,6 +33,7 @@
 #define NOTE_ON_VELOCITY_DELAY     15      // Delay (ms) from note trigger to get velocity
 #define MIDI_EXPRN_CC               2      // 2:Breath-pressure, 7:Channel-volume, 11:Expression
 #define MIDI_MODN_MSG_INTERVAL     30      // unit = ms
+#define ALKALINE_BATTERY            0      // non-zero -> NiMH
 
 #define ERROR_EEPROM_DATA_CHECK    (1<<0)    // bit0 of error code
 #define ERROR_CALIBRATING_SENSOR   (1<<1)    // bit1 of error code
@@ -128,11 +129,13 @@ typedef struct Eeprom_block_structure
   bool    MidiLegatoModeEnabled;    // MIDI Legato Mode Enabled (1)
   bool    VelocitySenseEnabled;     // Velocity sensing enabled (0)
   bool    PitchBendEnabled;         // Pitch Bend control enabled (0)
+  uint8   AudioAmpldControlMode;    // Audio Output Ampld Control Mode
   uint8   VibratoMode;              // Vibrato control mode (0, 1, 2,..)
   uint8   ReverbMix_pc;             // Reverb. wet/dry mix (1..100 %)
   uint8   BatteryType;              // Battery type, 0: Alkaline, 1:NiMH 
   uint8   PresetLastSelected;       // Preset last selected (index 0..7)
   uint16  PressureFullScale;        // Sensor ADC count at maximum pressure
+  uint16  PitchBendRange;           // Pitch-bend range, cents (0..1200)
   uint16  PresetPatchNum[10];       // Patch ID numbers for the 8 presets
   
   uint32  EndOfDataBlockCode;       // Last entry, used to test if format has changed

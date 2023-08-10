@@ -13,9 +13,9 @@
 #define GLOBAL_INT_DISABLE()        noInterrupts()
 
 #define SAMPLE_RATE_HZ        (40000)    // For wave-table Oscillators
-#define FILTER_INPUT_ATTEN      0.25f    // Set to avoid overloading filter input
-#define FILTER_OUTPUT_GAIN       4.0f    // Set to avoid overloading output mixer
-#define NOISE_FILTER_GAIN        4.0f    // Noise generator post-filter gain (x8)
+#define FILTER_INPUT_ATTEN      0.20f    // Set to avoid overloading filter input
+#define FILTER_OUTPUT_GAIN       4.0f    // Set to avoid output mixer clipping
+#define NOISE_FILTER_GAIN        4.0f    // Noise generator post-filter gain
 
 #define REVERB_DELAY_MAX_SIZE    2000    // samples 
 #define REVERB_LOOP_TIME_SEC     0.04    // seconds (max. 0.05 sec.)
@@ -25,6 +25,12 @@
 #define FIXED_MIN_LEVEL  (1)                     // Minimum normalized signal level (0.000001)
 #define FIXED_MAX_LEVEL  (IntToFixedPt(1) - 1)   // Full-scale normalized signal level (0.999999)
 #define FIXED_PT_HALF    (IntToFixedPt(1) / 2)   // Constant 0.5 in fixed_t format
+#define AUDIO_FLOOR_LEVEL  (20)                  // Audio "floor" level (approx. 0.00002)
+
+// Possible values for configuration parameter: g_Config.AudioAmpldControlMode
+#define AMPLD_CTRL_FIXED_FS         0    // Output ampld is fixed (full-scale)
+#define AMPLD_CTRL_ENV_VELO         1    // Output ampld control by Env * Velocity
+#define AMPLD_CTRL_EXPRESS          2    // Output ampld control by Expression (CC2/7/11)
 
 // Possible values for m_VibratoMode
 #define VIBRATO_DISABLED            0    // Vibrato off
@@ -49,30 +55,23 @@
 #define NOISE_ONLY_NO_WAVE          1    // Noise, no wave signal added
 #define NOISE_WAVE_ADDED            2    // Noise, wave signal added
 #define NOISE_WAVE_MIXED            3    // Noise, wave signal mixed (ratiometric)
-// Add 4 (set bit2 = 1) in the above values to enable Ring Modulator for "pitched noise"
-#define NOISE_PITCHED               4    // Pitched noise
+// Add 4 (set bit2) in the above values to enable Ring Modulator for "pitched noise"
+#define NOISE_PITCHED               4    // Pitched noise 
 
 // Possible values for patch parameter: m_Patch.NoiseLevelCtrl
-#define NOISE_LVL_ZERO              0    // Noise generator off
-#define NOISE_LVL_FIXED             1    // Noise level is fixed (settable)
-#define NOISE_LVL_AMPLD_ENV         2    // Noise level control by Ampld Envelope
-#define NOISE_LVL_EXPRESS           3    // Noise level control by Expression (CC2)
-#define NOISE_LVL_MODULN            4    // Noise level control by Modulation Lvr (CC1)
+#define NOISE_LVL_FIXED             0    // Noise level is fixed (constant)
+#define NOISE_LVL_AMPLD_ENV         1    // Noise level control by Ampld Envelope
+#define NOISE_LVL_LFO               2    // Noise level control by LFO 
+#define NOISE_LVL_EXPRESS           3    // Noise level control by Expression (CC2/CC11)
+#define NOISE_LVL_MODULN            4    // Noise level control by Modulation (CC1)
 
 // Possible values for patch parameter: m_Patch.FilterControl
 #define FILTER_CTRL_FIXED           0    // Filter Fc is fixed (FilterCornerFreq)
 #define FILTER_CTRL_CONTOUR         1    // Filter Fc control by Contour Env.
-#define FILTER_CTRL_ENV_POS         2    // Filter Fc control by Ampld Envelope
-#define FILTER_CTRL_ENV_NEG         3    // Filter Fc control by Ampld Env. Inverted
-#define FILTER_CTRL_LFO             4    // Filter Fc control by LFO (vibrato)
-#define FILTER_CTRL_MODULN          5    // Filter Fc control by Modulation Pad (CC1)
+#define FILTER_CTRL_LFO             2    // Filter Fc control by LFO (vibrato))
+#define FILTER_CTRL_EXPRESS         3    // Filter Fc control by Expression (CC2/CC11)
+#define FILTER_CTRL_MODULN          4    // Filter Fc control by Modulation (CC1)
 
-// Possible values for patch parameter: m_Patch.OutputAmpldCtrl
-#define AMPLD_CTRL_FIXED_L1         0    // Output ampld is fixed, Level 1 (default)
-#define AMPLD_CTRL_FIXED_L2         1    // Output ampld is fixed, Level 2
-#define AMPLD_CTRL_EXPRESS          2    // Output ampld control by Expression (CC2/CC11)
-#define AMPLD_CTRL_AMPLD_ENV        3    // Output ampld control by Amplitude Envelope
-#define AMPLD_CTRL_ENV_VELO         4    // Output ampld control by Env * Velocity
 
 enum  Amplitude_Envelope_Phases
 {
@@ -127,7 +126,7 @@ typedef  struct  synth_patch_param_table
   uint16  AmpldEnvDecay_ms;       // 1..10k ms
   uint16  AmpldEnvRelease_ms;     // 1..10k ms
   uint8   AmpldEnvSustain;        // 0..100 % (square-law curve ?)
-  uint8   OutputAmpldCtrl;        // 0:Max, 1:Fixed.5, 2:Exprn, 3:Ampld.Env, 4:Env*Vel
+  uint8   AudioLevelAdjust;       // 25..250 %
 
 } PatchParamTable_t;
 

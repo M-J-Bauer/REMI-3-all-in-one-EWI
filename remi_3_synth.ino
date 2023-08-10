@@ -53,14 +53,12 @@ static BOOL     m_ContourEnvTrigger;      // Signal to start mixer transient/con
 static BOOL     m_ContourEnvFinish;       // Signal to end mixer transient/contour
 static bool     m_LegatoNoteChange;       // Signal Legato note change to Vibrato func.
 static bool     m_Note_ON;                // TRUE if Note ON, ie. "gated", else FALSE
+static uint8    m_NotePlaying;            // MIDI note number of note playing
 
 static uint8    m_FilterAtten_pc;         // Filter input atten/gain (%)
 static uint8    m_FilterGain_x10;         // Filter output gain x10 (1..250)
 static uint8    m_NoiseGain_x10;          // Noise filter gain x10 (1..250)
 static fixed_t  m_FiltCoeff_c[110];       // Bi-quad filter coeff. c  (a1 = -c)
-static fixed_t  m_FiltCoeff_a2;           // Bi-quad filter coeff. a2
-static fixed_t  m_FiltCoeff_b0;           // Bi-quad filter coeff. b0  (b2 = -b0)
-static int      m_FilterIndex;            // Index into LUT: m_FiltCoeff_c[]
 
 static int      m_RvbDelayLen;            // Reverb. delay line length (samples)
 static fixed_t  m_RvbDecay;               // Reverb. decay factor
@@ -135,11 +133,12 @@ void  SynthAudioInit(void)
   sampleTimer.priority(1);
 
   // Calculate reverb constants
-  m_RvbDelayLen = (int) (REVERB_LOOP_TIME_SEC * SAMPLE_RATE_HZ);
-//  float rvbDecayFactor = (float) REVERB_LOOP_TIME_SEC / REVERB_DECAY_TIME_SEC;
-//  m_RvbDecay = FloatToFixed( powf(0.001f, rvbDecayFactor) );
-  m_RvbDecay = FloatToFixed( 0.87 );
-  m_RvbAtten = 102;  // default setting, approx 80%
+  m_RvbDelayLen = (int) (REVERB_LOOP_TIME_SEC * SAMPLE_RATE_HZ);  // samples
+  float rvbDecayFactor = (float) REVERB_LOOP_TIME_SEC / REVERB_DECAY_TIME_SEC;
+  
+  m_RvbDecay = FloatToFixed( powf(0.001f, rvbDecayFactor) );
+  // m_RvbDecay = FloatToFixed( 0.87 );
+  m_RvbAtten = 90;  // default setting, approx 70%
   m_RvbMix = 19;  // approx 15%
   
   GLOBAL_INT_ENABLE();  // Let 'er rip, Boris!
@@ -159,13 +158,9 @@ void  SynthPrepare()
   float   res, res_sq, freq_rat;
   float   pi_2 = 2.0f * 3.14159265f;
   int     idx;
-  int32   oscFreqLFO;  // 24:8 bit fixed-point
 
   v_SynthEnable = 0;    // Disable the synth tone-generator
   m_Note_ON = FALSE;    // no note playing
-
-  oscFreqLFO = (((int) g_Patch.LFO_Freq_x10) << 8) / 10;  // Fixed-point value (24:8 bits)
-  m_LFO_Step = (oscFreqLFO * SINE_WAVE_TABLE_SIZE) / 1000;  // LFO sample rate is 1000Hz.
 
   m_FilterAtten_pc = (uint8) (FILTER_INPUT_ATTEN * 100);
   m_FilterGain_x10 = (uint8) (FILTER_OUTPUT_GAIN * 10);
@@ -181,9 +176,9 @@ void  SynthPrepare()
   // Find coefficients for bi-quad filter according to patch param (FilterResonance)
   res = (float) g_Patch.FilterResonance / 10000;   // range 0 ~ 0.9999
   res_sq = res * res;
-  m_FiltCoeff_a2 = FloatToFixed(res_sq);
-  m_FiltCoeff_b0 = FloatToFixed(0.5f - (res_sq / 2.0f));
-
+  v_coeff_a2 = FloatToFixed(res_sq);
+  v_coeff_b0 = FloatToFixed(0.5f - (res_sq / 2.0f));
+  v_coeff_b2 = 0 - v_coeff_b0;  // b2 = -b0
   // Coeff a1 (a1 = -c) is both resonance and frequency dependent...
   for (idx = 0 ; idx <= 108 ; idx++)    // populate LUT
   {
@@ -215,7 +210,7 @@ void  WaveTableSelect(uint8 osc_num, uint8 wave_id)
       m_Osc1FreqDiv = g_FlashWaveTableDef[wave_id].FreqDiv;
       m_WaveTable1 = (int16 *) g_FlashWaveTableDef[wave_id].Address;
     }
-    else if (osc_num == 2)
+    if (osc_num == 2)
     {
       m_Osc2WaveTableSize = g_FlashWaveTableDef[wave_id].Size;
       m_Osc2FreqDiv = g_FlashWaveTableDef[wave_id].FreqDiv;
@@ -287,28 +282,32 @@ short  SynthPatchSelect(int patchNum)
 */
 void  SynthNoteOn(uint8 noteNum, uint8 velocity)
 {
+  int32  oscFreqLFO;  // 24:8 bit fixed-point
+
   if (!m_Note_ON)    // Note OFF -- Initiate a new note...
   {
     SynthNoteChange(noteNum);  // Set OSC1 and OSC2 frequencies, etc
 
+    oscFreqLFO = (((int32) g_Patch.LFO_Freq_x10) << 8) / 10;  // set LFO freq.
+    m_LFO_Step = (oscFreqLFO * SINE_WAVE_TABLE_SIZE) / 1000;  // LFO Fs = 1000Hz
     m_AmpldEnvOutput = 0;   // Zero the ampld envelope output signal
-
+    m_ContourEnvOutput = IntToFixedPt(g_Patch.ContourStartLevel) / 100;
+    
     // A square-law curve is applied to velocity
     m_AttackVelocity = IntToFixedPt((int) velocity) / 128;  // normalized
     m_AttackVelocity = MultiplyFixed(m_AttackVelocity, m_AttackVelocity);  // squared
 
-    GLOBAL_INT_DISABLE();
-    v_Osc1Angle = 0;
-    v_Osc2Angle = 0;
-    // Initialize wave mixer input levels (range 0..1024)
-    v_Mix2Level = (1000 * (int) g_Patch.MixerOsc2Level) / 100;
-    GLOBAL_INT_ENABLE();
+//  v_Osc1Angle = 0;  // redundant code ???
+//  v_Osc2Angle = 0;
+//  v_Mix2Level = (1000 * (int) g_Patch.MixerOsc2Level) / 100;
+//  v_NoiseLevel = 0;   
+//  v_OutputLevel = 0;
 
     m_LegatoNoteChange = 0;    // Not a Legato event
     m_TriggerAttack = 1;       // Let 'er rip, Boris
     m_ContourEnvTrigger = 1;
-	  v_SynthEnable = 1;         // in case not already enabled
     m_Note_ON = TRUE;
+    v_SynthEnable = 1;
   }
   else  // Note already playing -- Legato note change
   {
@@ -337,17 +336,12 @@ void  SynthNoteChange(uint8 noteNum)
   fixed_t osc1Step, osc2Step;
   float   osc2detune;      // ratio:  osc2Freq / osc1Freq;
   fixed_t detuneNorm;
-  int     filterCorner;    // unit = MIDI note number (semitone)
   int     cents;
 
-  // Ensure note number is within synth range (12 ~ 108)
-  while (noteNum > 108)  {
-    noteNum -= 12;  // too high
-  }
-
-  while (noteNum < 12)  {
-    noteNum += 12;   // too low
-  }
+  // Ensure note number is within synth range (12 ~ 120)
+  if (noteNum > 120)  noteNum -= 12;  // too high
+  if (noteNum < 12)   noteNum += 12;  // too low
+  m_NotePlaying = noteNum;
 
   // Convert MIDI note number to frequency (Hz);  apply OSC1 freq.divider param.
   osc1Freq = m_NoteFrequency[noteNum - 12] / m_Osc1FreqDiv;
@@ -366,52 +360,10 @@ void  SynthNoteChange(uint8 noteNum)
   m_Osc1StepInit = osc1Step;   // Needed for Osc FM (vibrato, pitch-bend, etc)
   m_Osc2StepInit = osc2Step;
 
-  // Calculate filter corner freq (pitch offset) for new note...
-  if (g_Patch.FilterNoteTrack)  // case 1: Note Tracking enabled
-  {
-    filterCorner = noteNum + g_Patch.FilterFrequency;  // MIDI note, variable
-    if (filterCorner > 120)  filterCorner = 120;       // Max at C9 (~8 kHz)
-    m_FilterIndex = filterCorner - 12;
-  }
-  else  // case 2: Note Tracking disabled
-  {
-    filterCorner = g_Patch.FilterFrequency;     // MIDI note, constant
-    if (filterCorner < 12)  filterCorner = 12;  // Min at C0 (~16 Hz)
-    m_FilterIndex = filterCorner - 12;
-  }
-  
-  // Use Fc = 16 Hz (minimum) for pitched noise option
-  if (g_Patch.NoiseMode & NOISE_PITCHED)  m_FilterIndex = 0;  
-  
-  GLOBAL_INT_DISABLE(); 
+  // GLOBAL_INT_DISABLE(); 
   v_Osc1Step = osc1Step;
   v_Osc2Step = osc2Step;
-  // Set filter coefficient values to be applied in the audio ISR
-  v_coeff_b0 = m_FiltCoeff_b0;
-  v_coeff_b2 = 0 - m_FiltCoeff_b0;      // b2 = -b0
-  v_coeff_a1 = 0 - m_FiltCoeff_c[m_FilterIndex];  // a1 = -c
-  v_coeff_a2 = m_FiltCoeff_a2;
-  GLOBAL_INT_ENABLE();
-}
-
-
-/*
-   Function:     Set the "Pressure Level" according to a given data value.
-                 Equivalent to MIDI Control Change message (CC# = 02, 07 or 11).
-
-   Entry args:   data14 = MIDI expression/pressure value (14 bits, unsigned).
-
-   Output:       (fixed_t) m_PressureLevel = normalized pressure level (0..+1.0)
-*/
-void   SynthExpression(unsigned data14)
-{
-
-  // Apply square law transfer function
-  uint32  ulval = ((uint32) data14 * data14) / 16384;  
-  fixed_t level = ulval << 6;  // convert to fixed-point fraction (20 bits)
-  if (level > FIXED_MAX_LEVEL) level = FIXED_MAX_LEVEL;  // clip at 0.99999
-
-  m_PressureLevel = level;  // process variable
+  // GLOBAL_INT_ENABLE();
 }
 
 
@@ -431,22 +383,42 @@ void  SynthNoteOff()
 
 
 /*
-   Function:    Modify pitch of note in progress according to Pitch-Bend data value.
+   Function:     Set the "Pressure Level" according to a given data value.
+                 Equivalent to MIDI Control Change message (CC# = 02, 07 or 11).
 
-   Entry arg:   data14 = signed integer representing Pitch Bend lever position,
-                         in the range +/-8000 (14 LS bits).  Centre pos'n is 0.
+   Entry args:   data14 = MIDI expression/pressure value (14 bits, unsigned).
 
-   Output:      m_PitchBendFactor, which is processed by the real-time synth function
-                OscFreqModulation() while a note is in progress.
+   Output:       (fixed_t) m_PressureLevel = normalized pressure level (0..+1.0)
 */
-void   SynthPitchBend(int data14)
+void   SynthExpression(unsigned data14)
 {
-  // Scale lever pos'n (arg) value according to operational variable m_PitchBendRange.
-  // PitchBendRange may be up to 1200 cents (i.e. 1 octave maximum).
-  int  posnScaled = (data14 * m_PitchBendRange) / 1200;
+  // Apply square law transfer function
+  uint32  ulval = ((uint32) data14 * data14) / 16384;  
+  fixed_t level = ulval << 6;  // convert to fixed-point fraction (20 bits)
+  
+  if (level > FIXED_MAX_LEVEL) level = FIXED_MAX_LEVEL;  // clip at 0.99999
 
-  // Convert to 20-bit *signed* fixed-point fraction  (13 + 7 = 20 bits)
-  m_PitchBendFactor = (fixed_t) (posnScaled << 7);
+  m_PressureLevel = level;  // process variable
+}
+
+
+/*
+ * Function:     Modify pitch of note in progress according to Pitch-Bend data value.
+ *
+ * Entry args:   bipolarPosn = signed integer representing Pitch Bend lever position,
+ *                        in the range +/-8000 (14 LS bits).  Centre pos'n is 0.
+ *
+ * Affected:     m_PitchBendFactor, which is processed by the real-time synth function
+ *               OscFreqModulation() while a note is in progress.
+ */
+void   SynthPitchBend(int bipolarPosn)
+{
+    // Scale lever position (arg) according to patch 'PitchBendRange' param.
+    // PitchBendRange may be up to 1200 cents (ie. 1 octave maximum).
+    int  posnScaled = (bipolarPosn * g_Config.PitchBendRange) / 1200;
+    
+    // Convert to 20-bit *signed* fixed-point fraction  (13 + 7 = 20 bits)
+    m_PitchBendFactor = (fixed_t) (posnScaled << 7);
 }
 
 
@@ -548,14 +520,14 @@ void   SynthProcess()
   static  int   count5ms;
 
   AmpldEnvelopeShaper();
-  ContourEnvelopeShaper();
   LowFrequencyOscillator();
   AudioLevelController();
 
   if (++count5ms == 5)  // 5ms process interval (200Hz)
   {
     count5ms = 0;
-	  VibratoRampGenerator();
+    ContourEnvelopeShaper();
+    VibratoRampGenerator();
     OscFreqModulation();       // Process pitch-bend or vibrato
     OscMixRatioModulation();   // Wave-table morphing routine
     NoiseLevelControl();       // Noise level control routine
@@ -669,7 +641,7 @@ void   AmpldEnvelopeShaper()
 
    Overview:  This routine is called by the Synth Process at 1ms intervals.
               The output level is controlled (modulated) by one of a variety of options
-              as determined by the patch parameter: g_Patch.OutputAmpldCtrl.
+              as determined by the config parameter: g_Config.AudioAmpldControlMode.
 
    Output:    (fixed_t) v_OutputLevel : normalized output level (0..+1.0)
               The output variable is used by the audio ISR to control the audio ampld,
@@ -681,27 +653,18 @@ void   AudioLevelController()
   fixed_t  exprnLevel;
   fixed_t  outputAmpld;  // Audio output level, normalized
 
-  if (g_Patch.OutputAmpldCtrl == AMPLD_CTRL_FIXED_L2)        // mode 1
-  {
-    if (m_Note_ON)  outputAmpld = FIXED_MAX_LEVEL / 2;
-    else  outputAmpld = 0;
-  }
-  else if (g_Patch.OutputAmpldCtrl == AMPLD_CTRL_EXPRESS)    // mode 2
+  if (g_Config.AudioAmpldControlMode == AMPLD_CTRL_EXPRESS)    // mode 2
   {
     // After Note-Off, MIDI Pressure/Expression Level is assumed to be zero
     if (m_Note_ON)  exprnLevel = m_PressureLevel;
     else  exprnLevel = 0;
-	
-	// Apply IIR smoothing filter to eliminate abrupt changes (K = 1/16)
+    
+    // Apply IIR smoothing filter to eliminate abrupt changes (K = 1/16)
     smoothExprnLevel -= smoothExprnLevel >> 4;
     smoothExprnLevel += exprnLevel >> 4;
     outputAmpld = smoothExprnLevel;
   }
-  else if (g_Patch.OutputAmpldCtrl == AMPLD_CTRL_AMPLD_ENV)  // mode 3
-  {
-    outputAmpld = m_AmpldEnvOutput;
-  }
-  else if (g_Patch.OutputAmpldCtrl == AMPLD_CTRL_ENV_VELO)   // mode 4
+  else if (g_Config.AudioAmpldControlMode == AMPLD_CTRL_ENV_VELO)   // mode 1
   {
     outputAmpld = MultiplyFixed(m_AmpldEnvOutput, m_AttackVelocity);
   }
@@ -712,6 +675,7 @@ void   AudioLevelController()
   }
 
   if (outputAmpld > FIXED_MAX_LEVEL)  outputAmpld = FIXED_MAX_LEVEL;
+  if (outputAmpld < AUDIO_FLOOR_LEVEL) outputAmpld = 0;  // below 0.00002
 
   v_OutputLevel = outputAmpld;  // accessed by audio ISR
 }
@@ -776,7 +740,7 @@ void   ContourEnvelopeShaper()
       }
   };  // end switch
 
-  contourSegmentTimer++;
+  contourSegmentTimer += 5;
 }
 
 
@@ -826,7 +790,7 @@ PRIVATE  void   VibratoRampGenerator()
 
     if (rampState == 0)  // Idle - waiting for Note-On
     {
-		  rampStep = IntToFixedPt(5) / (int) g_Patch.VibratoRamp_ms;
+          rampStep = IntToFixedPt(5) / (int) g_Patch.VibratoRamp_ms;
       if (m_Note_ON)  
         { m_RampOutput = 0;  delayTimer_ms = 0;  rampState = 1; }
     }
@@ -841,12 +805,12 @@ PRIVATE  void   VibratoRampGenerator()
       if (m_RampOutput > FIXED_MAX_LEVEL)  m_RampOutput = FIXED_MAX_LEVEL;
     }
     else  rampState = 0;  // Undefined state... reset
-	
-	// Check for Note-Off or Note-Change event while ramp is progressing
+    
+    // Check for Note-Off or Note-Change event while ramp is progressing
     if ((rampState != 0) && (!m_Note_ON || m_LegatoNoteChange))
     {
       if (m_LegatoNoteChange)  
-		    { m_LegatoNoteChange = 0;  m_RampOutput = 0;  delayTimer_ms = 0;  rampState = 1; }
+            { m_LegatoNoteChange = 0;  m_RampOutput = 0;  delayTimer_ms = 0;  rampState = 1; }
       else  rampState = 0;
     }
 }
@@ -876,7 +840,7 @@ void   OscFreqModulation()
 
   if (m_VibratoControl == VIBRATO_BY_MODN_CC)  // Use Mod Lever position
     modnLevel = (m_ModulationLevel * g_Patch.LFO_FM_Depth) / 1200;
-	  
+      
   if (m_VibratoControl == VIBRATO_AUTOMATIC)   //  Use Ramp Gen.
      modnLevel = (m_RampOutput * g_Patch.LFO_FM_Depth) / 1200;
  
@@ -967,15 +931,24 @@ void  OscMixRatioModulation()
 */
 void   NoiseLevelControl()
 {
-  if (g_Patch.NoiseLevelCtrl == NOISE_LVL_FIXED)           // mode 1 (Fixed max.)
-    v_NoiseLevel = FIXED_MAX_LEVEL;
-  else if (g_Patch.NoiseLevelCtrl == NOISE_LVL_AMPLD_ENV)  // mode 2
+  int  noiseCtrlSource = g_Patch.NoiseLevelCtrl & 7;  
+    
+  if (noiseCtrlSource == NOISE_LVL_FIXED)           // option 0 (Fixed %)
+  {
+    if ((g_Patch.NoiseMode & 3) == NOISE_WAVE_ADDED 
+    ||  (g_Patch.NoiseMode & 3) == NOISE_WAVE_MIXED )
+       v_NoiseLevel = (IntToFixedPt( 1 ) * g_Patch.MixerOsc2Level) / 100;
+    else  v_NoiseLevel = FIXED_MAX_LEVEL;  // Noise only
+  }
+  else if (noiseCtrlSource == NOISE_LVL_AMPLD_ENV)  // option 1
     v_NoiseLevel = m_AmpldEnvOutput;
-  else if (g_Patch.NoiseLevelCtrl == NOISE_LVL_EXPRESS)    // mode 3
-    v_NoiseLevel = (m_PressureLevel / 2);
-  else if (g_Patch.NoiseLevelCtrl == NOISE_LVL_MODULN)     // mode 4
-    v_NoiseLevel = (m_ModulationLevel * 75) / 100;
-  else  v_NoiseLevel = 0;  // ...........................  // mode 0 (Noise OFF)
+  else if (noiseCtrlSource == NOISE_LVL_LFO)        // option 2
+    v_NoiseLevel = ((m_LFO_output + IntToFixedPt(1)) * g_Patch.LFO_FM_Depth) / 200;
+  else if (noiseCtrlSource == NOISE_LVL_EXPRESS)    // option 3
+    v_NoiseLevel = (m_PressureLevel >> 2);
+  else if (noiseCtrlSource == NOISE_LVL_MODULN)     // option 4
+    v_NoiseLevel = (m_ModulationLevel >> 1);
+  else  v_NoiseLevel = 0;  // invalid option (Noise OFF)
 }
 
 
@@ -989,39 +962,56 @@ void   NoiseLevelControl()
  * filter coeff's do not need to be updated here.
  * The actual DSP filter algorithm is incorporated in the audio ISR.
  * 
- * Input variable:  m_FilterIndex = index into filter coeff LUT, varies with fc,
- *                                  determined at Note_ON and legato note change.
- *     
- * Output variables:  v_coeff_a1  = real-time filter coeff (fixed-point value)
+ * Output variable:  v_coeff_a1  = real-time filter coeff (fixed-point value)
  */
 PRIVATE  void   FilterFrequencyControl()
 {
-    fixed_t  devn;   // deviation from quiescent value (+/-0.5 max)
-    int  fc_idx;     // index into filter coeff (c) look-up table
+    fixed_t  devn;     // deviation from quiescent value (+/-0.5 max)
+    int  filterIndex;  // index into filter coeff (a1 = -c) look-up table
+    int  fc_idx;       //  ..     ..     ..    ..
     
-    if (g_Patch.NoiseMode != NOISE_DISABLED)  
-        return;  // wave filter is bypassed while noise is enabled
+    // Determine LUT index (filterIndex) for variable filter corner frequency
+    if (g_Patch.FilterNoteTrack)  // Note Tracking enabled
+      filterIndex = (m_NotePlaying - 12) + g_Patch.FilterFrequency;  // 0..108
+    else  filterIndex = (int) g_Patch.FilterFrequency;  // 0..108
     
+    if (filterIndex < 0)  filterIndex = 0;      // Min at C0 (~16Hz)
+    if (filterIndex > 108)  filterIndex = 108;  // Max at C9 (~8kHz)
+
+    if (g_Patch.NoiseMode)  // Bypass filter modulation if noise is enabled
+    {
+        if (g_Patch.NoiseMode & NOISE_PITCHED)  filterIndex = 0;  // ~ 16Hz
+        v_coeff_a1 = 0 - m_FiltCoeff_c[filterIndex];  // update the coeff a1 = -c
+        return;  
+    }
+
+    // ------------ Filter frequency modulation -----------------------
+    //
     if (g_Patch.FilterControl == FILTER_CTRL_CONTOUR)  // mode 1
     {
-        fc_idx = m_FilterIndex + IntegerPart(m_ContourEnvOutput * 108) - 50;
+        fc_idx = filterIndex + IntegerPart(m_ContourEnvOutput * 54) - 27;
     }
-    else if (g_Patch.FilterControl == FILTER_CTRL_LFO)  // mode 4
+    else if (g_Patch.FilterControl == FILTER_CTRL_LFO)  // mode 2
     {
-        devn = (m_LFO_output * g_Patch.LFO_FM_Depth) / 200;  // deviation (+/-0.5 max)
-        fc_idx = m_FilterIndex + IntegerPart(devn * 108);
+        devn = (m_LFO_output * g_Patch.LFO_FM_Depth) / 200;
+        fc_idx = filterIndex + IntegerPart(devn * 108);
     }
-    else if (g_Patch.FilterControl == FILTER_CTRL_MODULN)  // mode 5
+    else if (g_Patch.FilterControl == FILTER_CTRL_EXPRESS)  // mode 3
+    {
+        devn = (m_PressureLevel * 25) / 100;  // deviation (0.25 max)
+        fc_idx = filterIndex + IntegerPart(devn * 108);
+    }
+    else if (g_Patch.FilterControl == FILTER_CTRL_MODULN)  // mode 4
     {
         devn = (m_ModulationLevel * 50) / 100;  // deviation (0.5 max)
-        fc_idx = m_FilterIndex - IntegerPart(devn * 108);  // Fc decreases with mod'n level
+        fc_idx = filterIndex - IntegerPart(devn * 108);
     }
-    else  fc_idx = m_FilterIndex;  // filter Fc is constant or note tracking (offset)
+    else  fc_idx = filterIndex;  // filter Fc is constant or note tracking (offset)
 
-    if (fc_idx > 108)  fc_idx = 108;   // max. (~8 kHz)
-    if (fc_idx < 0)  fc_idx = 0;       // min. (~16 Hz)
+    if (fc_idx > 108)  fc_idx = 108;   // max. ~ 8kHz
+    if (fc_idx < 0)  fc_idx = 0;       // min. ~ 16Hz
 
-    v_coeff_a1 = 0 - m_FiltCoeff_c[fc_idx];  // a1 = -c
+    v_coeff_a1 = 0 - m_FiltCoeff_c[fc_idx];  // update coeff a1 = -c
 }
 
 
@@ -1106,7 +1096,6 @@ void  AudioSamplingRoutine(void)
       filter_out_1 = filterOut;
       // Adjust noise filter output level to compensate for spectral loss
       filterOut = (filterOut * m_NoiseGain_x10) / 10;
-
       // If enabled, Ring Modulate OSC2 output with filtered noise...
       if (g_Patch.NoiseMode & NOISE_PITCHED)
         noiseGenOut = MultiplyFixed(filterOut, osc2Sample);  // Ring Mod.
@@ -1152,18 +1141,18 @@ void  AudioSamplingRoutine(void)
     attenOut = MultiplyFixed(totalMixOut, v_OutputLevel);
 
     // Reverberation effect processor (Courtesy of Dan Mitchell, ref. "BasicSynth")
-	  if (m_RvbMix != 0)
-	  {
+    if (m_RvbMix != 0)
+    {
       reverbOut = MultiplyFixed(ReverbDelayLine[rvbIndex], m_RvbDecay);
       reverbLPF = (reverbOut + reverbPrev) >> 1;  // simple low-pass filter
-	    reverbPrev = reverbOut;
+      reverbPrev = reverbOut;
       ReverbDelayLine[rvbIndex] = ((attenOut * m_RvbAtten) >> 7) + reverbLPF;
       if (++rvbIndex >= m_RvbDelayLen)  rvbIndex = 0;  // wrap
       // Add reverb output to dry signal according to reverb mix setting...
       finalOutput = (attenOut * (128 - m_RvbMix)) >> 7;  // Dry portion
       finalOutput += (reverbOut * m_RvbMix) >> 7;   // Wet portion
-	  }
-	  else  finalOutput = attenOut;
+    }
+    else  finalOutput = attenOut;
   }
   
   // Audio DAC output (12 bits) -- update DAC register with sample value (1..3999).
@@ -1192,7 +1181,7 @@ int  GetPatchTableIndex(unsigned patchNumber)
 {
   int  i, patchIndex = -1;
   int  patchCount = GetNumberOfPatchesDefined();
-	
+    
   for (i = 0;  i < patchCount;  i++) 
   {
     if (g_PatchProgram[i].PatchNumber == patchNumber)  { patchIndex = i;  break; }
@@ -1324,5 +1313,150 @@ fixed_t  ScurveTransform(unsigned point)
   // Scale to and convert 15-bit integer to fixed-pt (20-bit fraction)
   return  (fixed_t) ((32767 * yval) / 31680) << 5;  
 }
+
+
+//=================================================================================================
+//
+// Lookup table to transform linear variable to base-2 exponential.
+// Index value range 0..1024 (integer) represents linear axis range -1.0 ~ +1.0.
+// Lookup value range is 0.5 to 2.0 (fixed point).  Centre (zero) value is 1.00.
+//
+// <!>  g_base2exp[] values are in 18:14 bit fixed-point format.
+//      Shift left 6 bit places to convert to 12:20 fixed-point.
+//      ````````````````````````````````````````````````````````
+// For higher precision, where required, use the function: Base2Exp()
+//
+const  uint16  g_base2exp[] =
+{
+    0x2000, 0x200B, 0x2016, 0x2021, 0x202C, 0x2037, 0x2042, 0x204E,
+    0x2059, 0x2064, 0x206F, 0x207A, 0x2086, 0x2091, 0x209C, 0x20A8,
+    0x20B3, 0x20BE, 0x20CA, 0x20D5, 0x20E0, 0x20EC, 0x20F7, 0x2103,
+    0x210E, 0x211A, 0x2125, 0x2130, 0x213C, 0x2148, 0x2153, 0x215F,
+    0x216A, 0x2176, 0x2181, 0x218D, 0x2199, 0x21A4, 0x21B0, 0x21BC,
+    0x21C7, 0x21D3, 0x21DF, 0x21EB, 0x21F6, 0x2202, 0x220E, 0x221A,
+    0x2226, 0x2231, 0x223D, 0x2249, 0x2255, 0x2261, 0x226D, 0x2279,
+    0x2285, 0x2291, 0x229D, 0x22A9, 0x22B5, 0x22C1, 0x22CD, 0x22D9,
+    0x22E5, 0x22F1, 0x22FD, 0x2309, 0x2315, 0x2322, 0x232E, 0x233A,
+    0x2346, 0x2352, 0x235F, 0x236B, 0x2377, 0x2384, 0x2390, 0x239C,
+    0x23A9, 0x23B5, 0x23C1, 0x23CE, 0x23DA, 0x23E7, 0x23F3, 0x23FF,
+    0x240C, 0x2418, 0x2425, 0x2432, 0x243E, 0x244B, 0x2457, 0x2464,
+    0x2470, 0x247D, 0x248A, 0x2496, 0x24A3, 0x24B0, 0x24BD, 0x24C9,
+    0x24D6, 0x24E3, 0x24F0, 0x24FC, 0x2509, 0x2516, 0x2523, 0x2530,
+    0x253D, 0x254A, 0x2557, 0x2564, 0x2570, 0x257D, 0x258A, 0x2598,
+    0x25A5, 0x25B2, 0x25BF, 0x25CC, 0x25D9, 0x25E6, 0x25F3, 0x2600,
+    0x260D, 0x261B, 0x2628, 0x2635, 0x2642, 0x2650, 0x265D, 0x266A,
+    0x2678, 0x2685, 0x2692, 0x26A0, 0x26AD, 0x26BA, 0x26C8, 0x26D5,
+    0x26E3, 0x26F0, 0x26FE, 0x270B, 0x2719, 0x2726, 0x2734, 0x2742,
+    0x274F, 0x275D, 0x276A, 0x2778, 0x2786, 0x2794, 0x27A1, 0x27AF,
+    0x27BD, 0x27CB, 0x27D8, 0x27E6, 0x27F4, 0x2802, 0x2810, 0x281E,
+    0x282C, 0x283A, 0x2847, 0x2855, 0x2863, 0x2871, 0x287F, 0x288E,
+    0x289C, 0x28AA, 0x28B8, 0x28C6, 0x28D4, 0x28E2, 0x28F0, 0x28FF,
+    0x290D, 0x291B, 0x2929, 0x2938, 0x2946, 0x2954, 0x2962, 0x2971,
+    0x297F, 0x298E, 0x299C, 0x29AA, 0x29B9, 0x29C7, 0x29D6, 0x29E4,
+    0x29F3, 0x2A01, 0x2A10, 0x2A1F, 0x2A2D, 0x2A3C, 0x2A4A, 0x2A59,
+    0x2A68, 0x2A77, 0x2A85, 0x2A94, 0x2AA3, 0x2AB2, 0x2AC0, 0x2ACF,
+    0x2ADE, 0x2AED, 0x2AFC, 0x2B0B, 0x2B1A, 0x2B29, 0x2B38, 0x2B47,
+    0x2B56, 0x2B65, 0x2B74, 0x2B83, 0x2B92, 0x2BA1, 0x2BB0, 0x2BBF,
+    0x2BCE, 0x2BDE, 0x2BED, 0x2BFC, 0x2C0B, 0x2C1B, 0x2C2A, 0x2C39,
+    0x2C48, 0x2C58, 0x2C67, 0x2C77, 0x2C86, 0x2C95, 0x2CA5, 0x2CB4,
+    0x2CC4, 0x2CD3, 0x2CE3, 0x2CF3, 0x2D02, 0x2D12, 0x2D21, 0x2D31,
+    0x2D41, 0x2D50, 0x2D60, 0x2D70, 0x2D80, 0x2D8F, 0x2D9F, 0x2DAF,
+    0x2DBF, 0x2DCF, 0x2DDF, 0x2DEF, 0x2DFE, 0x2E0E, 0x2E1E, 0x2E2E,
+    0x2E3E, 0x2E4E, 0x2E5F, 0x2E6F, 0x2E7F, 0x2E8F, 0x2E9F, 0x2EAF,
+    0x2EBF, 0x2ED0, 0x2EE0, 0x2EF0, 0x2F00, 0x2F11, 0x2F21, 0x2F31,
+    0x2F42, 0x2F52, 0x2F62, 0x2F73, 0x2F83, 0x2F94, 0x2FA4, 0x2FB5,
+    0x2FC5, 0x2FD6, 0x2FE7, 0x2FF7, 0x3008, 0x3018, 0x3029, 0x303A,
+    0x304B, 0x305B, 0x306C, 0x307D, 0x308E, 0x309F, 0x30AF, 0x30C0,
+    0x30D1, 0x30E2, 0x30F3, 0x3104, 0x3115, 0x3126, 0x3137, 0x3148,
+    0x3159, 0x316A, 0x317C, 0x318D, 0x319E, 0x31AF, 0x31C0, 0x31D2,
+    0x31E3, 0x31F4, 0x3205, 0x3217, 0x3228, 0x323A, 0x324B, 0x325C,
+    0x326E, 0x327F, 0x3291, 0x32A2, 0x32B4, 0x32C6, 0x32D7, 0x32E9,
+    0x32FB, 0x330C, 0x331E, 0x3330, 0x3341, 0x3353, 0x3365, 0x3377,
+    0x3389, 0x339B, 0x33AC, 0x33BE, 0x33D0, 0x33E2, 0x33F4, 0x3406,
+    0x3418, 0x342A, 0x343C, 0x344F, 0x3461, 0x3473, 0x3485, 0x3497,
+    0x34AA, 0x34BC, 0x34CE, 0x34E0, 0x34F3, 0x3505, 0x3517, 0x352A,
+    0x353C, 0x354F, 0x3561, 0x3574, 0x3586, 0x3599, 0x35AB, 0x35BE,
+    0x35D1, 0x35E3, 0x35F6, 0x3609, 0x361C, 0x362E, 0x3641, 0x3654,
+    0x3667, 0x367A, 0x368D, 0x369F, 0x36B2, 0x36C5, 0x36D8, 0x36EB,
+    0x36FE, 0x3712, 0x3725, 0x3738, 0x374B, 0x375E, 0x3771, 0x3784,
+    0x3798, 0x37AB, 0x37BE, 0x37D2, 0x37E5, 0x37F8, 0x380C, 0x381F,
+    0x3833, 0x3846, 0x385A, 0x386D, 0x3881, 0x3894, 0x38A8, 0x38BC,
+    0x38CF, 0x38E3, 0x38F7, 0x390B, 0x391E, 0x3932, 0x3946, 0x395A,
+    0x396E, 0x3982, 0x3996, 0x39AA, 0x39BE, 0x39D2, 0x39E6, 0x39FA,
+    0x3A0E, 0x3A22, 0x3A36, 0x3A4A, 0x3A5F, 0x3A73, 0x3A87, 0x3A9B,
+    0x3AB0, 0x3AC4, 0x3AD8, 0x3AED, 0x3B01, 0x3B16, 0x3B2A, 0x3B3F,
+    0x3B53, 0x3B68, 0x3B7C, 0x3B91, 0x3BA6, 0x3BBA, 0x3BCF, 0x3BE4,
+    0x3BF9, 0x3C0D, 0x3C22, 0x3C37, 0x3C4C, 0x3C61, 0x3C76, 0x3C8B,
+    0x3CA0, 0x3CB5, 0x3CCA, 0x3CDF, 0x3CF4, 0x3D09, 0x3D1E, 0x3D34,
+    0x3D49, 0x3D5E, 0x3D73, 0x3D89, 0x3D9E, 0x3DB3, 0x3DC9, 0x3DDE,
+    0x3DF4, 0x3E09, 0x3E1F, 0x3E34, 0x3E4A, 0x3E5F, 0x3E75, 0x3E8B,
+    0x3EA0, 0x3EB6, 0x3ECC, 0x3EE2, 0x3EF7, 0x3F0D, 0x3F23, 0x3F39,
+    0x3F4F, 0x3F65, 0x3F7B, 0x3F91, 0x3FA7, 0x3FBD, 0x3FD3, 0x3FE9,
+    0x4000, 0x4016, 0x402C, 0x4042, 0x4058, 0x406F, 0x4085, 0x409C,
+    0x40B2, 0x40C8, 0x40DF, 0x40F5, 0x410C, 0x4122, 0x4139, 0x4150,
+    0x4166, 0x417D, 0x4194, 0x41AA, 0x41C1, 0x41D8, 0x41EF, 0x4206,
+    0x421D, 0x4234, 0x424A, 0x4261, 0x4278, 0x4290, 0x42A7, 0x42BE,
+    0x42D5, 0x42EC, 0x4303, 0x431B, 0x4332, 0x4349, 0x4360, 0x4378,
+    0x438F, 0x43A7, 0x43BE, 0x43D6, 0x43ED, 0x4405, 0x441C, 0x4434,
+    0x444C, 0x4463, 0x447B, 0x4493, 0x44AA, 0x44C2, 0x44DA, 0x44F2,
+    0x450A, 0x4522, 0x453A, 0x4552, 0x456A, 0x4582, 0x459A, 0x45B2,
+    0x45CA, 0x45E3, 0x45FB, 0x4613, 0x462B, 0x4644, 0x465C, 0x4675,
+    0x468D, 0x46A5, 0x46BE, 0x46D6, 0x46EF, 0x4708, 0x4720, 0x4739,
+    0x4752, 0x476A, 0x4783, 0x479C, 0x47B5, 0x47CE, 0x47E7, 0x47FF,
+    0x4818, 0x4831, 0x484A, 0x4864, 0x487D, 0x4896, 0x48AF, 0x48C8,
+    0x48E1, 0x48FB, 0x4914, 0x492D, 0x4947, 0x4960, 0x497A, 0x4993,
+    0x49AD, 0x49C6, 0x49E0, 0x49F9, 0x4A13, 0x4A2D, 0x4A46, 0x4A60,
+    0x4A7A, 0x4A94, 0x4AAE, 0x4AC8, 0x4AE1, 0x4AFB, 0x4B15, 0x4B30,
+    0x4B4A, 0x4B64, 0x4B7E, 0x4B98, 0x4BB2, 0x4BCC, 0x4BE7, 0x4C01,
+    0x4C1B, 0x4C36, 0x4C50, 0x4C6B, 0x4C85, 0x4CA0, 0x4CBA, 0x4CD5,
+    0x4CF0, 0x4D0A, 0x4D25, 0x4D40, 0x4D5B, 0x4D75, 0x4D90, 0x4DAB,
+    0x4DC6, 0x4DE1, 0x4DFC, 0x4E17, 0x4E32, 0x4E4D, 0x4E69, 0x4E84,
+    0x4E9F, 0x4EBA, 0x4ED5, 0x4EF1, 0x4F0C, 0x4F28, 0x4F43, 0x4F5F,
+    0x4F7A, 0x4F96, 0x4FB1, 0x4FCD, 0x4FE9, 0x5004, 0x5020, 0x503C,
+    0x5058, 0x5074, 0x508F, 0x50AB, 0x50C7, 0x50E3, 0x50FF, 0x511C,
+    0x5138, 0x5154, 0x5170, 0x518C, 0x51A9, 0x51C5, 0x51E1, 0x51FE,
+    0x521A, 0x5237, 0x5253, 0x5270, 0x528C, 0x52A9, 0x52C5, 0x52E2,
+    0x52FF, 0x531C, 0x5339, 0x5355, 0x5372, 0x538F, 0x53AC, 0x53C9,
+    0x53E6, 0x5403, 0x5421, 0x543E, 0x545B, 0x5478, 0x5495, 0x54B3,
+    0x54D0, 0x54EE, 0x550B, 0x5529, 0x5546, 0x5564, 0x5581, 0x559F,
+    0x55BD, 0x55DA, 0x55F8, 0x5616, 0x5634, 0x5652, 0x5670, 0x568E,
+    0x56AC, 0x56CA, 0x56E8, 0x5706, 0x5724, 0x5742, 0x5761, 0x577F,
+    0x579D, 0x57BC, 0x57DA, 0x57F9, 0x5817, 0x5836, 0x5854, 0x5873,
+    0x5891, 0x58B0, 0x58CF, 0x58EE, 0x590D, 0x592B, 0x594A, 0x5969,
+    0x5988, 0x59A7, 0x59C7, 0x59E6, 0x5A05, 0x5A24, 0x5A43, 0x5A63,
+    0x5A82, 0x5AA1, 0x5AC1, 0x5AE0, 0x5B00, 0x5B1F, 0x5B3F, 0x5B5F,
+    0x5B7E, 0x5B9E, 0x5BBE, 0x5BDE, 0x5BFD, 0x5C1D, 0x5C3D, 0x5C5D,
+    0x5C7D, 0x5C9D, 0x5CBE, 0x5CDE, 0x5CFE, 0x5D1E, 0x5D3E, 0x5D5F,
+    0x5D7F, 0x5DA0, 0x5DC0, 0x5DE1, 0x5E01, 0x5E22, 0x5E42, 0x5E63,
+    0x5E84, 0x5EA5, 0x5EC5, 0x5EE6, 0x5F07, 0x5F28, 0x5F49, 0x5F6A,
+    0x5F8B, 0x5FAC, 0x5FCE, 0x5FEF, 0x6010, 0x6031, 0x6053, 0x6074,
+    0x6096, 0x60B7, 0x60D9, 0x60FA, 0x611C, 0x613E, 0x615F, 0x6181,
+    0x61A3, 0x61C5, 0x61E7, 0x6209, 0x622B, 0x624D, 0x626F, 0x6291,
+    0x62B3, 0x62D5, 0x62F8, 0x631A, 0x633C, 0x635F, 0x6381, 0x63A4,
+    0x63C6, 0x63E9, 0x640B, 0x642E, 0x6451, 0x6474, 0x6497, 0x64B9,
+    0x64DC, 0x64FF, 0x6522, 0x6545, 0x6569, 0x658C, 0x65AF, 0x65D2,
+    0x65F6, 0x6619, 0x663C, 0x6660, 0x6683, 0x66A7, 0x66CA, 0x66EE,
+    0x6712, 0x6736, 0x6759, 0x677D, 0x67A1, 0x67C5, 0x67E9, 0x680D,
+    0x6831, 0x6855, 0x6879, 0x689E, 0x68C2, 0x68E6, 0x690B, 0x692F,
+    0x6954, 0x6978, 0x699D, 0x69C1, 0x69E6, 0x6A0B, 0x6A2F, 0x6A54,
+    0x6A79, 0x6A9E, 0x6AC3, 0x6AE8, 0x6B0D, 0x6B32, 0x6B57, 0x6B7D,
+    0x6BA2, 0x6BC7, 0x6BED, 0x6C12, 0x6C38, 0x6C5D, 0x6C83, 0x6CA8,
+    0x6CCE, 0x6CF4, 0x6D1A, 0x6D3F, 0x6D65, 0x6D8B, 0x6DB1, 0x6DD7,
+    0x6DFD, 0x6E24, 0x6E4A, 0x6E70, 0x6E96, 0x6EBD, 0x6EE3, 0x6F09,
+    0x6F30, 0x6F57, 0x6F7D, 0x6FA4, 0x6FCB, 0x6FF1, 0x7018, 0x703F,
+    0x7066, 0x708D, 0x70B4, 0x70DB, 0x7102, 0x7129, 0x7151, 0x7178,
+    0x719F, 0x71C7, 0x71EE, 0x7216, 0x723D, 0x7265, 0x728D, 0x72B4,
+    0x72DC, 0x7304, 0x732C, 0x7354, 0x737C, 0x73A4, 0x73CC, 0x73F4,
+    0x741C, 0x7444, 0x746D, 0x7495, 0x74BE, 0x74E6, 0x750F, 0x7537,
+    0x7560, 0x7589, 0x75B1, 0x75DA, 0x7603, 0x762C, 0x7655, 0x767E,
+    0x76A7, 0x76D0, 0x76F9, 0x7723, 0x774C, 0x7775, 0x779F, 0x77C8,
+    0x77F2, 0x781B, 0x7845, 0x786F, 0x7899, 0x78C2, 0x78EC, 0x7916,
+    0x7940, 0x796A, 0x7994, 0x79BF, 0x79E9, 0x7A13, 0x7A3D, 0x7A68,
+    0x7A92, 0x7ABD, 0x7AE7, 0x7B12, 0x7B3D, 0x7B67, 0x7B92, 0x7BBD,
+    0x7BE8, 0x7C13, 0x7C3E, 0x7C69, 0x7C94, 0x7CBF, 0x7CEB, 0x7D16,
+    0x7D41, 0x7D6D, 0x7D98, 0x7DC4, 0x7DEF, 0x7E1B, 0x7E47, 0x7E73,
+    0x7E9F, 0x7ECA, 0x7EF6, 0x7F22, 0x7F4F, 0x7F7B, 0x7FA7, 0x7FD3,
+    0x8000
+};
 
 // end-of-file

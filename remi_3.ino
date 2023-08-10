@@ -20,9 +20,9 @@
 EepromBlock_t  g_Config;      // structure holding configuration param's
 
 //------------------- PRESET:   8   1   2   3   4   5   6   7
-uint8  defaultSynthPatch[]  = { 41, 10, 11, 21, 26, 48, 45, 40 };
+uint8  defaultSynthPatch[]  = { 43, 10, 11, 21, 26, 45, 41, 42 };
 
-// Array of touch readings corresponding to touch-pad pins (for diagnostics only):
+// Array of touch readings corresponding to touch-pad pins (for diagnostics only): 
 uint16  touchReadings[12];
 
 extern  int32   g_debugValue;
@@ -263,8 +263,9 @@ void  CheckPowerSource()
       if (!LowBatteryFlag) BATT_LED_SET_DUTY(5);  // 5% duty => battery OK
     }
     // Check battery voltage;  if low, set low-voltage warning flag  
-    if (g_Config.BatteryType != 0) threshold_mV = 2200;  // NiMH (2 x 1.2V nominal)
+    if (g_Config.BatteryType != ALKALINE_BATTERY) threshold_mV = 2200;  // NiMH (2 x 1.2V nominal)
     else threshold_mV = 2700;  // Alkaline (2 x 1.5V nominal)
+    LowBatteryFlag = FALSE;
     if (BatteryVoltage_mV < threshold_mV) LowBatteryFlag = TRUE;
     threshold_mV = (threshold_mV * 90) / 100;  // 90% of low-voltage warning -> shut down
     if (BatteryVoltage_mV < threshold_mV) ShutdownFlag = TRUE;
@@ -280,10 +281,10 @@ void  CheckPowerSource()
   }
   
   // Check sensibility of battery type (config. param.)
-  if (g_Config.BatteryType != 0 && BatteryVoltage_mV > 2700)
+  if (g_Config.BatteryType != ALKALINE_BATTERY && BatteryVoltage_mV > 2900)
   {
     // Voltage too high for NiMH -- change config setting to Alkaline (0)
-    g_Config.BatteryType = 0;
+    g_Config.BatteryType = ALKALINE_BATTERY;
     StoreConfigData();
   }
 }
@@ -695,7 +696,8 @@ void   Player_UI_Service()
     }
     else if (TouchPadStates == (RH3 + RH4))  // toggle battery type
     {
-      g_Config.BatteryType ^= 1;   // 0: Alkaline, 1:NiMH
+      if (g_Config.BatteryType == ALKALINE_BATTERY) g_Config.BatteryType = 1;  // change to NiMH
+      else g_Config.BatteryType = ALKALINE_BATTERY;   // change to Alkaline
       StoreConfigData();
     }
     else if (TouchPadStates == (LH3 + RH1))
@@ -1113,7 +1115,8 @@ void  DisplayBattery(bool prep)
     Disp_PosXY(0, 32);
     Disp_PutText("Type:  ");
     Disp_SetFont(MONO_8_NORM);
-    if (g_Config.BatteryType == 0) Disp_PutText("Alkaline");
+    if (g_Config.BatteryType == ALKALINE_BATTERY) 
+      Disp_PutText("Alkaline");
     else  Disp_PutText("NiMH");
 
     lastValueShown = g_Config.BatteryType;
@@ -1564,8 +1567,9 @@ void  DefaultConfigData(void)
   g_Config.MidiLegatoModeEnabled = TRUE;
   g_Config.VelocitySenseEnabled = FALSE;
   g_Config.VibratoMode = 0;  // OFF
+  g_Config.AudioAmpldControlMode = AMPLD_CTRL_EXPRESS;
   g_Config.ReverbMix_pc = 10;
-  g_Config.BatteryType = 0;  // Alkaline (3V)
+  g_Config.BatteryType = !ALKALINE_BATTERY;
   g_Config.PresetLastSelected = 1;
   g_Config.PressureFullScale = 4095;
 
